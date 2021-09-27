@@ -3,17 +3,20 @@
 import os
 import sys
 import gzip
-import shutil
 import mmap
 import struct
-import subprocess
-import time
 import datetime
 import json
 import socket
 import hashlib
+from array import array
 
-from typing import Generator, Tuple, Union
+import shutil
+import subprocess
+import time
+# import pandas as pd
+
+from typing import Callable, Generator, Tuple, Union, List
 
 # import numpy as np
 
@@ -35,15 +38,15 @@ from typing import Generator, Tuple, Union
 #
 #
 #
-#4.0K example-03.fasta.gz
-#   8K example-05.fasta.gz
-#  80K example-07.fasta.gz
-# 1.3M example-09.fasta.gz
-#  19M example-11.fasta.gz
-# 291M example-13.fasta.gz
-# 4.7G example-15.fasta.gz
-#  74G example-17.fasta.gz
-# 2.0G example-19.fasta.gz
+# 4.0K example-03.fasta.gz  2.1K example-03.fasta.gz.03.08.bin
+#   8K example-05.fasta.gz  3.1K example-05.fasta.gz.05.08.bin
+#  80K example-07.fasta.gz   19K example-07.fasta.gz.07.08.bin
+# 1.3M example-09.fasta.gz  259K example-09.fasta.gz.09.08.bin
+#  19M example-11.fasta.gz  4.1M example-11.fasta.gz.11.08.bin
+# 291M example-13.fasta.gz   65M example-13.fasta.gz.13.08.bin
+# 4.7G example-15.fasta.gz  1.1G example-15.fasta.gz.15.08.bin
+#  74G example-17.fasta.gz   17G example-17.fasta.gz.17.08.bin
+#
 # 225M S_lycopersicum_chromosomes.4.00.fa.gz
 #
 #
@@ -57,37 +60,42 @@ from typing import Generator, Tuple, Union
 #
 #
 # Example
-#       real       user       sys     
-# K=11  0m11.038s  0m10.770s  0m0.152s  5,724,677 bp/s
-# K=13  2m19.482s  2m16.338s  0m1.341s  6,507,812 bp/s
-# K=15 56m30.314s 34m18.113s  1m55.517s 4,861,152 bp/s
+#       real        user        sys        speed
+# K=11   0m 6.213s   0m 6.172s   0m0.040s   8,554,287 bp/s
+# K=13   2m19.482s   2m16.338s   0m1.341s  11,796,623 bp/s
+# K=15  27m21.105s  26m23.109s  0m14.690s  11,800,204 bp/s
 # K=17 
+# K=19 
 #
 #
 #time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15 8
-#      real        user        sys        speed
-#K= 3   6m 8.481s   5m59.835s  0m 8.641s  2,092,563 bp/s
-#K= 7   6m26.430s   6m17.894s  0m 8.500s  2,021,611 bp/s
-#K=13   9m41.243s   9m22.733s  0m 9.972s  1,354,429 bp/s
-#K=15  16m38.052s  11m30.725s  0m43.636s    866,345 bp/s
-
+#      real         speed
+#K= 3   4m41.935s   2,754,109 bp/s
+#K= 7   
+#K= 9   5m 7.420s   2,576,543 bp/s
+#K=11   
+#K=13   5m11.103s   2,538,100 bp/s
+#K=15   
+#K=17   8m24.544s   2,184,808 bp/s
+#K=19  
+#K=21  
 
 
 DEBUG      = False
 USE_PYTHON = True
 
-ALFA     = 'ACGT'
-CONV     = [None] * 255
-ALFA_SET = set(ALFA)
+ALFA       = 'ACGT'
+CONV       = [None] * 255
+ALFA_SET   = set(ALFA)
 for pos, nuc in enumerate(ALFA):
     CONV[ord(nuc.upper())] = pos
     CONV[ord(nuc.lower())] = pos
 
-# IND        0     1            2            3     4            5     6     7     8
-# VALD             1            3                  15                             255
-# VALB             1            11                 1111                           11111111
-# MAX              0-1          0-3                0-128                          0-255
-BIT_MASKS = [None, 0b0000_0001, 0b0000_0011, None, 0b0000_1111, None, None, None, 0b1111_1111]
+# IND         0     1            2            3     4            5     6     7     8
+# VALD              1            3                  15                             255
+# VALB              1            11                 1111                           11111111
+# MAX               0-1          0-3                0-128                          0-255
+BIT_MASKS  = [None, 0b0000_0001, 0b0000_0011, None, 0b0000_1111, None, None, None, 0b1111_1111]
 
 # IND          0     1   2  3     4   5     6     7     8
 # VALB               1   11       1111                  11111111
@@ -111,6 +119,10 @@ class Timer:
         self.time_delta_s = 'none'
         self.speed_ela    = 0
         self.speed_delta  = 0
+
+    @property
+    def time_delta_seconds(self):
+        return (datetime.datetime.now() - self.time_last).total_seconds()
 
     def update(self, val):
         time_now          = datetime.datetime.now()
@@ -259,15 +271,16 @@ def gen_checksum(filename, chunk_size=65536):
 
     return file_hash.hexdigest()
 
-def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str], None, None]:
-    seq_name  = None
-    seq       = []
-    seq_num   = 0
-    line_num  = 0
-    bp_num    = 0
-    bp_last_e = 0
+def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, int], None, None]:
+    seq_name : str       = None
+    seq      : List[str] = []
+    seq_num  : int       = 0
+    line_num : int       = 0
+    bp_num   : int       = 0
+    bp_last_e: int       = 0
 
-    timer     = Timer()
+    timer    :Timer      = Timer()
+    conv     :List[Tuple[int,None]] = CONV
 
     for line in fhd:
         line = line.strip()
@@ -288,10 +301,11 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str], 
                     print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
                     print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
                     print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
-                seq_str  = "".join(seq)
-                seq_str  = [CONV[ord(s)] for s in seq_str]
-                bp_num  += len(seq_str)
-                yield seq_name, seq_str
+                seq_str  = (ord(s) for b in seq for s in b)
+                seq_str  = [conv[s] for s in seq_str]
+                seq_len  = len(seq_str)
+                bp_num  += seq_len
+                yield seq_name, seq_str, seq_len
             seq_name  = line[1:]
             seq_num  += 1
             seq.clear()
@@ -302,16 +316,17 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str], 
         print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
         print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
         print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
-        seq_str  = "".join(seq)
-        seq_str  = [CONV[ord(s)] for s in seq_str]
-        bp_num  += len(seq_str)
-        yield seq_name, seq_str
+        seq_str  = (ord(s) for b in seq for s in b)
+        seq_str  = [conv[s] for s in seq_str]
+        seq_len  = len(seq_str)
+        bp_num  += seq_len
+        yield seq_name, seq_str, seq_len
 
     print(f"seq_name: {'DONE'  :25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
     print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
     print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
 
-def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str], None, None]:
+def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str, int], None, None]:
     filehandler = None
 
     if fasta_file is None:
@@ -340,31 +355,34 @@ def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str], None,
             for row in parse_fasta(fhd):
                 yield row
 
-def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, int], None, None]:
-    pos_val = [4**(kmer_len-p-1) for p in range(kmer_len)]
+def gen_kmers(fasta_file: str, kmer_len: int, opener: Callable) -> Generator[Tuple[int, str, int, int, mmap.mmap], None, None]:
+    pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
 
-    for num, (name, seq) in enumerate(read_fasta(fasta_file)):
+    for num, (name, seq, seq_len) in enumerate(read_fasta(fasta_file)):
+        mm = opener()
         # print(f"{num+1:11,d} {name}")
         # print(f"{num+1:03d} {name} {seq}")
-        seq_len = len(seq)
 
         for i in range(0, seq_len - kmer_len + 1):
-            # print(i)
-            ints    = seq[i:i+kmer_len]
-            if None in ints: continue
-            fwd = 0
-            rev = 0
-            for p, i in enumerate(ints):
-                fwd += pos_val[         p  ]*   i
-                rev += pos_val[kmer_len-p-1]*(3-i) 
+            ints:List[Union[int,None]] = seq[i:i+kmer_len]
 
-            # stni    = (3-i          for i    in reversed( ints))
-            # ints_p  = (pos_val[p]*i for p, i in enumerate(ints))
-            # stni_p  = (pos_val[p]*i for p, i in enumerate(stni))
-            # fwd     = sum(ints_p)
-            # rev     = sum(stni_p)
-            # assert fwd == fwd2, f"{fwd} == {fwd2}"
-            # assert rev == rev2, f"{rev} == {rev2}"
+            if None in ints: continue
+
+            fwd:int = 0
+            rev:int = 0
+            eints:List[Tuple[int,int]] = enumerate(ints)
+            for p, i in eints: fwd += pos_val[         p  ]*   i
+            for p, i in eints: rev += pos_val[kmer_len-p-1]*(3-i) 
+
+            # for p, i in enumerate(ints):
+            #     fwd += pos_val[         p  ]*   i
+            #     rev += pos_val[kmer_len-p-1]*(3-i) 
+
+            # fwd = sum((pos_val[         p  ]*   i  for p, i in enumerate(ints)))
+            # rev = sum((pos_val[kmer_len-p-1]*(3-i) for p, i in enumerate(ints)))
+
+            # val = ((pos_val[         p  ]*   i, pos_val[kmer_len-p-1]*(3-i)) for p, i in enumerate(ints))
+            # fwd, rev = (sum(f) for f in zip(*val))
 
             # print(f"{num+1:03d} {name} {i} {kmer} {ints} {ints_p} {fwd:03d} {stni} {stni_p} {rev:03d}")
             # print(f"{num+1:03d} {name} {seq} {fwd:03d} {rev:03d}")
@@ -373,7 +391,11 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
             # print(" pos_val", pos_val)
             # print(" ints_p ", ints_p, fwd)
             # print(" stni_p ", stni_p, rev)
-            yield num, name, fwd, rev
+
+            yield num, name, fwd, rev, mm
+
+        mm.flush()
+        mm.close()
 
 def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer_len: int, field_len: int, overwrite: bool, debug: bool = False) -> None:
     header = Header(project_name, fasta_file, kmer_len, field_len)
@@ -395,8 +417,16 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
         fhd.seek(0)
 
         # https://docs.python.org/3/library/mmap.html
-        mm = mmap.mmap(fhd.fileno(), header.max_size, access=mmap.ACCESS_WRITE)
-        for num, name, fwd, rev in gen_kmers(fasta_file, kmer_len):
+        # print("initializing database")
+        # sys.stdout.flush()
+        # mm = [0 for _ in range(header.data_size)]
+        # mm = array('B', (0 for _ in range(header.data_size)))
+        # print("  done")
+        sys.stdout.flush()
+
+        opener = lambda : mmap.mmap(fhd.fileno(), header.max_size, access=mmap.ACCESS_WRITE)
+
+        for num, name, fwd, rev, mm in gen_kmers(fasta_file, kmer_len, opener):
             pos               = fwd if fwd < rev else rev
             header.num_kmers += 1
             # print(num, name, fwd, rev, pos)
@@ -406,46 +436,46 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
             # print(f"num {num} name {name} fwd {fwd} rev {rev} pos {pos} byte_pos {byte_pos}")
 
             bit_shift       = (bit_pos*field_len)                   # number of shifts
-            byte_val        = int(mm[header.HEADER_LEN+byte_pos])          # get value
-            bit_val_mask    = int(header.bit_mask<<bit_shift)              # bit mask
+            byte_val        = int(mm[header.HEADER_LEN+byte_pos])   # get value
+            # byte_val        = 0   # get value
+            # byte_val        = mm[byte_pos]   # get value
+            bit_val_mask    = int(header.bit_mask<<bit_shift)       # bit mask
             bit_val         = byte_val & bit_val_mask               # bit value
             bit_val_s       = bit_val >> bit_shift                  # bit value shifted
 
             if bit_val_s == 0:
                 header.num_unique_kmers += 1                               # add first appearance of a kmer
 
-            if bit_val_s >= (2**field_len-1): continue              # skip if overflown
+            if bit_val_s < (2**field_len-1):
+                bit_res         = bit_val_s + 1                         # add to value
+                bit_res_s       = bit_res << bit_shift                  # shift back to position
+                byte_res        = byte_val & ~ bit_val_mask | bit_res_s # replace old value
 
-            bit_res         = bit_val_s + 1                         # add to value
-            bit_res_s       = bit_res << bit_shift                  # shift back to position
-            byte_res        = byte_val & ~ bit_val_mask | bit_res_s # replace old value
+                mm[header.HEADER_LEN+byte_pos] = byte_res                      # save
+                # mm[byte_pos] = byte_res                      # save
 
-            mm[header.HEADER_LEN+byte_pos] = byte_res                      # save
+                header.hist[byte_val] -= 1 if byte_val else 0                  # update histogram
+                header.hist[byte_res] += 1                                     # update histogram
 
-            header.hist[byte_val] -= 1 if byte_val else 0                  # update histogram
-            header.hist[byte_res] += 1                                     # update histogram
+                if (kmer_len <= 5 and DEBUG) or debug:
+                    print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
+                    print(f"  byte_pos     {byte_pos    :3d} bit_pos  {bit_pos :3d} bit_shift {bit_shift:3d}")
+                    print(f"  byte_val     {byte_val    :3d} {byte_val    :08b}")
+                    print(f"  bit_val_mask {bit_val_mask:3d} {bit_val_mask:08b}")
+                    print(f"  bit_val      {bit_val     :3d} {bit_val     :08b}")
+                    print(f"  bit_val_s    {bit_val_s   :3d} {bit_val_s   :08b}")
+                    print(f"  bit_res      {bit_res     :3d} {bit_res     :08b}")
+                    print(f"  bit_res_s    {bit_res_s   :3d} {bit_res_s   :08b}")
+                    print(f"  byte_res     {byte_res    :3d} {byte_res    :08b}\n")
 
-            if (kmer_len <= 5 and DEBUG) or debug:
-                print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
-                print(f"  byte_pos     {byte_pos    :3d} bit_pos  {bit_pos :3d} bit_shift {bit_shift:3d}")
-                print(f"  byte_val     {byte_val    :3d} {byte_val    :08b}")
-                print(f"  bit_val_mask {bit_val_mask:3d} {bit_val_mask:08b}")
-                print(f"  bit_val      {bit_val     :3d} {bit_val     :08b}")
-                print(f"  bit_val_s    {bit_val_s   :3d} {bit_val_s   :08b}")
-                print(f"  bit_res      {bit_res     :3d} {bit_res     :08b}")
-                print(f"  bit_res_s    {bit_res_s   :3d} {bit_res_s   :08b}")
-                print(f"  byte_res     {byte_res    :3d} {byte_res    :08b}\n")
-
-        mm.flush()
-        mm.close()
         fhd.flush()
 
-        if (kmer_len <= 5 and DEBUG) or debug:
-            fhd.seek(0)
-            mm = mmap.mmap(fhd.fileno(), 0, access=mmap.ACCESS_READ)
-            for byte_pos, byte_val in enumerate(memoryview(mm[HEADER_LEN:])):
-                print(byte_val, end=" ")
-            print()
+        # if (kmer_len <= 5 and DEBUG) or debug:
+        #     fhd.seek(0)
+        #     mm = mmap.mmap(fhd.fileno(), 0, access=mmap.ACCESS_READ)
+        #     for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:])):
+        #         print(byte_val, end=" ")
+        #     print()
 
         # print(hist_uniq, hist_sum, hist)
         print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} field_len {header.field_len:14,d} num_kmers {header.num_kmers:14,d} num_unique_kmers {header.num_unique_kmers:14,d} kmer_size {header.kmer_size:14,d} word_len {header.word_len:14,d} max_size {header.max_size:14,d} hist_sum {header.hist_sum:14,d} hist_uniq {header.hist_uniq:14,d}")
@@ -454,15 +484,18 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
         # save header
 
         print("  done indexing")
+
+        print("  saving data")
+        fhd.seek(header.HEADER_LEN+1)
+        # for c in mm:
+        #     fhd.write(chr(c).encode())
+        # mm.tofile(fhd)
+        fhd.flush()
+        fhd.seek(0)
+        print("    done")
+
         print("  creating header")
-
-        # f.seek(0)
-        # ba = bytearray(HEADER_LEN)
-        # struct.pack_into(HEADER_FMT, ba, 0, kmer_len, field_len, num_kmers, num_unique_kmers, hist_sum, hist_uniq, *hist)
-        # f.write(ba)
-
         header.write(fhd)
-
         print("  header saved")
         print("  DONE")
 
@@ -557,7 +590,7 @@ def read_fasta_index(project_name: str, index_file: str, debug: bool = False) ->
 
 def run_test(overwrite=False):
     project_name = "example"
-    # kmer_lens =  [3, 5, 7, 9, 11, 13, 15]
+    # kmer_lens =  [3, 5, 7, 9, 11, 13, 15, 17]
     # kmer_lens =  [3]
     # kmer_lens =  [5]
     # kmer_lens =  [7]
