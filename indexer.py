@@ -70,15 +70,15 @@ from typing import Callable, Generator, Tuple, Union, List
 #
 #time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15 8
 #      real         speed
-#K= 3   4m41.935s   2,754,109 bp/s
+#K= 3   1,303,590 bp/s
 #K= 7   
-#K= 9   5m 7.420s   2,576,543 bp/s
+#K= 9   
 #K=11   
-#K=13   5m11.103s   2,538,100 bp/s
+#K=13   
 #K=15   
-#K=17   8m24.544s   2,184,808 bp/s
+#K=17   
 #K=19  
-#K=21  
+#K=21  2,263,620 bp/s
 
 
 DEBUG      = False
@@ -271,6 +271,152 @@ def gen_checksum(filename, chunk_size=65536):
 
     return file_hash.hexdigest()
 
+import numpy as np
+
+def test_np(kmer_len, seq):
+    pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
+
+    seq = tuple(4 if s is None else s for s in seq)
+
+    w = np.array(pos_val, dtype='int64')
+    f = np.array(seq, dtype='int8')
+    f = np.nan_to_num(f, nan=4, copy=False)
+    # print(np.where(f == 4))
+    # f = f[438600:438800]
+    # print(f == 4)
+
+    print("w.shape", w.shape)
+    print("w.dtype", w.dtype)
+    print("f.shape", f.shape)
+    print("f.dtype", f.dtype)
+
+    for fc, (unique, counts) in enumerate(test_np_ord(w, f)):
+        print(" fc", fc+1)
+        print("  unique.shape", unique.shape)
+        print("  unique.dtype", unique.dtype)
+        print("  counts.shape", counts.shape)
+        print("  counts.dtype", counts.dtype)
+        yield unique, counts
+        # for k in ls:
+        #     print(" k", k)
+
+def test_np_ord(w, l):
+    ws = w.shape[0]
+    # print("w", w)
+
+    for y in range(ws):
+        m = l[y:]
+        ms = m.shape[0]
+        # print("m.shape", ms)
+
+        lt = m[:ms//ws*ws]
+        lts = lt.shape[0]
+        # print("lt.shape", lts)
+
+        lm = lt.reshape(lts//ws, ws)
+        # print("lm.shape", lm.shape)
+
+        lq = np.any(lm == 4, axis=1)
+
+        lr = lm[~lq]
+        lrs = lr.shape
+        # print("lr", lr)
+        # print("lr.shape", lrs)
+        
+        rc_lr = lr[:,::-1]
+        rc    = 3 - rc_lr
+        # print("rc_lr", rc_lr)
+        # print("rc   ", rc)
+
+        lv = lr * w
+        # print("lv      ", lv)
+        # print("lv.shape", lv.shape)
+
+        rc_lv = rc * w
+        # print("rc_lv      ", rc_lv)
+        # print("rc_lv.shape", rc_lv.shape)
+
+        ls = lv.sum(axis=1)
+        # print("ls      ", ls)
+        # print("ls.shape", ls.shape)
+        # print("ls.dtype", ls.dtype)
+
+        rc_ls = rc_lv.sum(axis=1)
+        # print("rc_ls      ", rc_ls)
+        # print("rc_ls.shape", rc_ls.shape)
+        # print("rc_ls.dtype", rc_ls.dtype)
+
+        # ls.sort()
+        # rc_ls.sort()
+
+        kmin = np.minimum(ls, rc_ls)
+        # print("kmin      ", kmin)
+        # print("kmin.shape", kmin.shape)
+        # print("kmin.dtype", kmin.dtype)
+
+        unique, counts = np.unique(kmin, return_counts=True)
+        yield unique, counts
+
+def test_np_example():
+    w = np.array([4, 5])
+    w
+    # array([4, 5])
+
+    l = np.array([3, 3, 2, 2, 0, 4, 5])
+    l
+    # array([2, 2, 3, 3, 0, 4, 5])
+
+    for y in range(w.shape[0]):
+        print(y)
+
+        m = l[y:]
+        m
+        # 0
+        # array([2, 2, 3, 3, 0, 4, 5])
+        # 1
+        # array([2, 3, 3, 0, 4, 5])
+
+        lt = m[:m.shape[0]//2*2]
+        lt
+        # array([2, 2, 3, 3, 0, 4])
+
+        lm = lt.reshape(lt.shape[0]//2, 2)
+        lm
+        # array([
+        #     [2, 2],
+        #     [3, 3],
+        #     [0, 4]])
+
+        lq = np.any(lm == 0, axis=1)
+        lq
+        # array([False, False,  True])
+
+        lr = lm[~lq]
+        lr
+        # array([
+        #     [2, 2],
+        #     [3, 3]])
+
+        lv = lr * w
+        lv
+        # array([
+        #     [12, 15],
+        #     [ 8, 10]])
+
+        ls = lv.sum(axis=1)
+        ls
+        # array([27, 18])
+
+        ls.sort()
+        ls
+        # array([18, 27])
+
+        # unique, counts = np.unique(ls, return_counts=True)
+        # unique
+        # # array([18, 27])
+        # counts
+        # # array([1, 1])
+
 def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, int], None, None]:
     seq_name : str       = None
     seq      : List[str] = []
@@ -302,7 +448,7 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, i
                     print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
                     print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
                 seq_str  = (ord(s) for b in seq for s in b)
-                seq_str  = [conv[s] for s in seq_str]
+                seq_str  = tuple(conv[s] for s in seq_str)
                 seq_len  = len(seq_str)
                 bp_num  += seq_len
                 yield seq_name, seq_str, seq_len
@@ -317,7 +463,7 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, i
         print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
         print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
         seq_str  = (ord(s) for b in seq for s in b)
-        seq_str  = [conv[s] for s in seq_str]
+        seq_str  = tuple(conv[s] for s in seq_str)
         seq_len  = len(seq_str)
         bp_num  += seq_len
         yield seq_name, seq_str, seq_len
@@ -359,10 +505,21 @@ def gen_kmers(fasta_file: str, kmer_len: int, opener: Callable) -> Generator[Tup
     pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
 
     for num, (name, seq, seq_len) in enumerate(read_fasta(fasta_file)):
-        mm = opener()
+        # mm = opener()
+        mm = None
         # print(f"{num+1:11,d} {name}")
-        # print(f"{num+1:03d} {name} {seq}")
+        print(f"{num+1:03d} {name} {seq_len}")
+        
+        for (unique, counts) in test_np(kmer_len, seq):
+            nu = unique.shape[0]
+            for n in range(nu):
+                yield num, name, unique[n], counts[n], mm
+        continue
 
+
+        ints:List[Union[int,None]] = []
+        fwd:int = 0
+        rev:int = 0
         for i in range(0, seq_len - kmer_len + 1):
             ints:List[Union[int,None]] = seq[i:i+kmer_len]
 
@@ -370,9 +527,9 @@ def gen_kmers(fasta_file: str, kmer_len: int, opener: Callable) -> Generator[Tup
 
             fwd:int = 0
             rev:int = 0
-            eints:List[Tuple[int,int]] = enumerate(ints)
-            for p, i in eints: fwd += pos_val[         p  ]*   i
-            for p, i in eints: rev += pos_val[kmer_len-p-1]*(3-i) 
+            for p, i in enumerate(ints): 
+                fwd += pos_val[         p  ]*   i
+                rev += pos_val[kmer_len-p-1]*(3-i) 
 
             # for p, i in enumerate(ints):
             #     fwd += pos_val[         p  ]*   i
@@ -394,8 +551,8 @@ def gen_kmers(fasta_file: str, kmer_len: int, opener: Callable) -> Generator[Tup
 
             yield num, name, fwd, rev, mm
 
-        mm.flush()
-        mm.close()
+        # mm.flush()
+        # mm.close()
 
 def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer_len: int, field_len: int, overwrite: bool, debug: bool = False) -> None:
     header = Header(project_name, fasta_file, kmer_len, field_len)
@@ -410,7 +567,7 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
     if os.path.exists(index_file_tmp):
         os.remove(index_file_tmp)
 
-    with open(index_file_tmp, "w+b") as fhd:
+    with open(index_file_tmp, "w+b", buffering=2**16) as fhd:
         fhd.seek(header.max_size - 1)
         fhd.write('\0'.encode())
         # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
@@ -424,10 +581,12 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
         # print("  done")
         sys.stdout.flush()
 
-        opener = lambda : mmap.mmap(fhd.fileno(), header.max_size, access=mmap.ACCESS_WRITE)
+        # opener = lambda : mmap.mmap(fhd.fileno(), header.max_size, access=mmap.ACCESS_WRITE)
+        opener = lambda : fhd
 
-        for num, name, fwd, rev, mm in gen_kmers(fasta_file, kmer_len, opener):
-            pos               = fwd if fwd < rev else rev
+        # for num, name, fwd, rev, mm in gen_kmers(fasta_file, kmer_len, opener):
+        for num, name, pos, count, mm in gen_kmers(fasta_file, kmer_len, opener):
+            # pos               = fwd if fwd < rev else rev
             header.num_kmers += 1
             # print(num, name, fwd, rev, pos)
 
@@ -436,7 +595,11 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
             # print(f"num {num} name {name} fwd {fwd} rev {rev} pos {pos} byte_pos {byte_pos}")
 
             bit_shift       = (bit_pos*field_len)                   # number of shifts
-            byte_val        = int(mm[header.HEADER_LEN+byte_pos])   # get value
+            # byte_val        = int(mm[header.HEADER_LEN+byte_pos])   # get value
+            dst = header.HEADER_LEN+byte_pos
+            if dst != fhd.tell():
+                fhd.seek(dst)
+            byte_val        = ord(fhd.read(1))   # get value
             # byte_val        = 0   # get value
             # byte_val        = mm[byte_pos]   # get value
             bit_val_mask    = int(header.bit_mask<<bit_shift)       # bit mask
@@ -447,11 +610,19 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
                 header.num_unique_kmers += 1                               # add first appearance of a kmer
 
             if bit_val_s < (2**field_len-1):
-                bit_res         = bit_val_s + 1                         # add to value
+                # bit_res         = bit_val_s + 1                         # add to value
+                bit_res         = bit_val_s + count                     # add to value
+
+                if bit_res > (2**field_len-1):
+                    bit_res = (2**field_len-1)
+                
                 bit_res_s       = bit_res << bit_shift                  # shift back to position
                 byte_res        = byte_val & ~ bit_val_mask | bit_res_s # replace old value
 
-                mm[header.HEADER_LEN+byte_pos] = byte_res                      # save
+                # mm[header.HEADER_LEN+byte_pos] = byte_res                      # save
+                if dst != fhd.tell():
+                    fhd.seek(dst)
+                byte_val        = fhd.write(chr(byte_res).encode())   # get value
                 # mm[byte_pos] = byte_res                      # save
 
                 header.hist[byte_val] -= 1 if byte_val else 0                  # update histogram
