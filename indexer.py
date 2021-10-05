@@ -15,6 +15,7 @@ from array import array
 import shutil
 import subprocess
 import time
+import tempfile
 # import pandas as pd
 
 from typing import Callable, Generator, Tuple, Union, List
@@ -66,20 +67,20 @@ import numpy as np
 # K=11   0m 6.213s   0m 6.172s   0m0.040s   8,554,287 bp/s
 # K=13   2m19.482s   2m16.338s   0m1.341s  11,796,623 bp/s
 # K=15  27m21.105s  26m23.109s  0m14.690s  11,800,204 bp/s
-# K=17 
-# K=19 
+# K=17
+# K=19
 #
 #
 #time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15 8
 #      real         speed
 #K= 3   1,303,590 bp/s
-#K= 7   
-#K= 9   
-#K=11   
-#K=13   
-#K=15   
-#K=17   
-#K=19  
+#K= 7
+#K= 9
+#K=11
+#K=13
+#K=15
+#K=17
+#K=19
 #K=21  2,263,620 bp/s
 
 
@@ -151,81 +152,133 @@ class Timer:
         return rep
 
 class Header:
-    HEADER     = b'KMER001'
-    HEADER_LEN = len(HEADER) + 1*8
+    HEADER_VER       = b'KMER001'
+    HEADER_VAL_FMT   = '<Q'
+    HEADER_VAL_SIZE  = struct.calcsize(HEADER_VAL_FMT)
+    HEADER_VAL_NAMES = ['kmer_len']
+    HEADER_LEN       = len(HEADER_VER) + HEADER_VAL_SIZE
+    HEADER_DATA      = [
+        "project_name"       ,
+        "kmer_len"           ,
+        "input_file_name"    , "input_file_size"  , "input_file_ctime" , "input_file_cheksum",
+        "num_kmers"          ,
+        "creation_time_start", "creation_time_end", "creation_duration",
+        "hostname"           , "checksum_script"  ,
+        "hist"               ,
+        "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
+        "vals_sum"           , "vals_count"       , "vals_min"         , "vals_max"
 
-    def __init__(self, project_name: str, fasta_file: str, kmer_len: int):
-        self.project_name     = project_name
-        self.fasta_file       = fasta_file
-        self.time_start       = datetime.datetime.now()
-        self.kmer_len         = kmer_len
+    ]
 
-        self.hist             = [0 for _ in range(2**8)]
-        self.num_kmers        = 0
-        self.num_unique_kmers = 0
+    def __init__(self, project_name: str, input_file_name: str, kmer_len: int):
+        self.project_name           = project_name
+        self.input_file_name        = input_file_name
+        self.kmer_len               = kmer_len
 
-        # self.kmer_size        = 4 ** self.kmer_len
-        # self.word_len         = (8 // self.field_len)
-        # self.data_size        = self.kmer_size * self.field_len // 8
-        # self.max_size         = self.HEADER_LEN + self.data_size
-        # self.bit_mask         = BIT_MASKS[self.field_len]
+        self.input_file_size        = None
+        self.input_file_ctime       = None
+        self.input_file_cheksum     = None
 
-    @property
-    def hist_sum(self): return sum(self.hist)
-    @property
-    def hist_uniq(self): return len([h for h in self.hist if h])
+        self.num_kmers              = None
+
+        self._creation_time_start_t = datetime.datetime.now()
+        self.creation_time_start    = None
+        self.creation_time_end      = None
+        self.creation_duration      = None
+
+        self.hostname               = None
+        self.checksum_script        = None
+
+        self.hist                   = None
+        self.hist_sum               = None
+        self.hist_count             = None
+        self.hist_min               = None
+        self.hist_max               = None
+
     @property
     def kmer_size(self): return 4 ** self.kmer_len
+
     @property
     def data_size(self): return self.kmer_size
+
     @property
     def max_size(self): return self.HEADER_LEN + self.data_size
 
-    def write(self, fhd):
-        fhd.seek(0)
-        fhd.write(self.HEADER)
-        
-        ba = bytearray(1*8)
-        struct.pack_into('<Q', ba, 0, self.kmer_len)
-        fhd.write(ba)
-        time_end   = datetime.datetime.now()
+    @property
+    def file_ver(self): return self.HEADER_VER.decode()
 
-        header_data = {
-            "kmer_len"           : self.kmer_len        ,
-            "num_kmers"          : self.num_kmers       ,
-            "num_unique_kmers"   : self.num_unique_kmers,
-            "hist_sum"           : self.hist_sum        ,
-            "hist_uniq"          : self.hist_uniq       ,
-            "hist"               : self.hist            ,
-            "project_name"       : self.project_name    , 
-            "input_file_name"    : self.fasta_file      ,
-            "input_file_size"    : os.path.getsize(self.fasta_file),
-            "input_file_ctime"   : os.path.getctime(self.fasta_file),
-            "input_file_cheksum" : gen_checksum(self.fasta_file),
-            "creation_time_start": str(self.time_start) ,
-            "creation_time_end"  : str(time_end)        ,
-            "creation_duration"  : str(time_end - self.time_start),
-            "hostname"           : socket.gethostname(),
-            "checksum_script"    : gen_checksum(os.path.basename(__file__))
-        }
+    @property
+    def header_len(self): return self.HEADER_LEN
+
+    @property
+    def max_val(self): return np.iinfo(np.uint8).max
+
+    def as_array(self, fhd):
+        npmm = np.memmap(fhd, dtype=np.uint8, mode='r+', offset=self.header_len, shape=(self.data_size,))
+        return npmm
+
+    def calc_stats(self, fhd):
+        arr             = self.as_array(fhd)
+        hist_v, _       = np.histogram(arr, bins=self.max_val, range=(0,self.max_val))
+
+        self.hist       = hist_v.tolist()
+
+        self.hist_sum   = np.sum(hist_v).item()
+        self.hist_count = np.count_nonzero(hist_v)
+        self.hist_min   = np.min(hist_v).item()
+        self.hist_max   = np.max(hist_v).item()
+
+        self.vals_sum   = np.sum(arr).item()
+        self.vals_count = np.count_nonzero(arr)
+        self.vals_min   = np.min(arr).item()
+        self.vals_max   = np.max(arr).item()
+
+    def update(self):
+        time_end                 = datetime.datetime.now()
+
+        self.input_file_size     = os.path.getsize(self.input_file_name)
+        self.input_file_ctime    = os.path.getctime(self.input_file_name)
+        self.input_file_cheksum  = gen_checksum(self.input_file_name)
+
+        self.creation_time_start = str(self._creation_time_start_t)
+        self.creation_time_end   = str(time_end)
+        self.creation_duration   = str(time_end - self._creation_time_start_t)
+
+        self.hostname            = socket.gethostname()
+        self.checksum_script     = gen_checksum(os.path.basename(__file__))
+
+    def write(self, fhd):
+        self.update()
+        self.calc_stats(fhd)
+
+        header_data = {k: getattr(self,k) for k in self.HEADER_DATA}
+
         header_json = json.dumps(header_data, indent=None, sort_keys=1, separators=(',', ':'))
-        # json_size   = len(header_json)
+
+        fhd.seek(0)
+        fhd.write(self.HEADER_VER)
+
+        ba = bytearray(self.HEADER_VAL_SIZE)
+        struct.pack_into(self.HEADER_VAL_FMT, ba, 0, *(getattr(self, k) for k in self.HEADER_VAL_NAMES))
+        fhd.write(ba)
 
         fhd.seek(self.max_size + 1)
-        # ba = bytearray(8)
-        # struct.pack_into('<Q', ba, 0, json_size)
-        # f.write(ba)
         fhd.write(header_json.encode())
 
     def read(self, fhd):
-        file_ver = fhd.read(len(self.HEADER))
-        assert file_ver == self.HEADER
-        print(f"file_ver    : {file_ver.decode()}")
+        file_ver = fhd.read(len(self.HEADER_VER))
+        assert file_ver.decode() == self.file_ver
 
-        self.kmer_len = struct.unpack_from("<Q", fhd.read(1*8))
-        print(f"kmer_len    : {self.kmer_len}")
-        print(f"kmer_size   : {self.kmer_size}")
-        print(f"data_size   : {self.data_size}")
+        # print(f"{'file_ver':20s}: {file_ver.decode()}")
+
+        vals = struct.unpack_from(self.HEADER_VAL_FMT, fhd.read(self.HEADER_VAL_SIZE))
+        for n, k in enumerate(self.HEADER_VAL_NAMES):
+            setattr(self, k, vals[n]) 
+
+        # print(f"{'kmer_len ':20s}: {self.kmer_len :14,d}")
+        # print(f"{'kmer_size':20s}: {self.kmer_size:14,d}")
+        # print(f"{'data_size':20s}: {self.data_size:14,d}")
+        # print(f"{'max_size ':20s}: {self.max_size :14,d}")
 
         fhd.seek(self.HEADER_LEN + self.data_size + 1)
         header_json = fhd.read().decode()
@@ -234,25 +287,46 @@ class Header:
         header_data = json.loads(header_json)
         # print(header_data)
 
-        (
-            self.kmer_len           ,
-            self.num_kmers          , self.num_unique_kmers ,
-            self.hist,
-            self.project_name       ,
-            self.input_file_name    , self.input_file_size  , self.input_file_ctime , self.input_file_cheksum,
-            self.creation_time_start, self.creation_time_end, self.creation_duration,
-            self.hostname           , self.checksum_script
-        )= [header_data[k] for k in [
-            "kmer_len"           ,
-            "num_kmers"          , "num_unique_kmers" ,
-            "hist",
-            "project_name"       ,
-            "input_file_name"    , "input_file_size"  , "input_file_ctime" , "input_file_cheksum",
-            "creation_time_start", "creation_time_end", "creation_duration",
-            "hostname"           , "checksum_script"
-        ]]
+        for k in self.HEADER_DATA:
+            v = header_data[k]
+            # print(f"{k:20s}: {str(v)[:50]}")
+            setattr(self, k, v)
 
         fhd.seek(0)
+
+    def check(self, fhd):
+        self.read(fhd)
+
+        other = self.__class__(self.project_name, self.input_file_name, self.kmer_len)
+        other.read(fhd)
+        assert self.project_name     == other.project_name
+        assert self.input_file_name  == other.input_file_name
+        assert self.kmer_len         == other.kmer_len
+        assert self.num_kmers        == other.num_kmers
+
+        other.calc_stats(fhd)
+        assert self.hist             == other.hist
+        assert self.hist_sum         == other.hist_sum
+        assert self.hist_count       == other.hist_count
+        assert self.hist_min         == other.hist_min
+        assert self.hist_max         == other.hist_max
+        assert self.vals_sum         == other.vals_sum
+        assert self.vals_count       == other.vals_count
+        assert self.vals_min         == other.vals_min
+        assert self.vals_max         == other.vals_max
+
+        del other
+
+    def __str__(self):
+        res = []
+        for k in ["file_ver", "kmer_len", "kmer_size", "data_size", "max_size"] + self.HEADER_DATA:
+            v = getattr(self, k)
+            if isinstance(v, int):
+                res.append(f"{k:20s}: {v:16,d}")
+            else:
+                res.append(f"{k:20s}: {str(v)[:50]}")
+        return "\n".join(res) + "\n"
+
 
 
 def gen_checksum(filename, chunk_size=65536):
@@ -316,7 +390,7 @@ def test_np_ord(w, l):
         lrs = lr.shape
         # print("lr", lr)
         # print("lr.shape", lrs)
-        
+
         rc_lr = lr[:,::-1]
         rc    = 3 - rc_lr
         # print("rc_lr", rc_lr)
@@ -480,7 +554,7 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, i
             seq.clear()
         else:
             seq.append(line)
-    
+
     if seq_name is not None:
         print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
         print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
@@ -530,8 +604,8 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
     for num, (name, seq, seq_len) in enumerate(read_fasta(fasta_file)):
         # mm = None
         # print(f"{num+1:11,d} {name}")
-        print(f"{num+1:03d} {name} {seq_len}")
-        
+        print(f"{num+1:03d} {name} {seq_len:14,d}")
+
         ints:List[Union[int,None]] = []
         fwd:int = 0
         rev:int = 0
@@ -542,9 +616,9 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
 
             fwd:int = 0
             rev:int = 0
-            for p, i in enumerate(ints): 
+            for p, i in enumerate(ints):
                 fwd += pos_val[         p  ]*   i
-                rev += pos_val[kmer_len-p-1]*(3-i) 
+                rev += pos_val[kmer_len-p-1]*(3-i)
 
             # print(f"{num+1:03d} {name} {i} {kmer} {ints} {ints_p} {fwd:03d} {stni} {stni_p} {rev:03d}")
             # print(f"{num+1:03d} {name} {seq} {fwd:03d} {rev:03d}")
@@ -556,41 +630,50 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
 
             yield num, name, fwd, rev
 
-def process_kmers(kmers: List[int], header_len:int, max_size:int, fhd:typing.IO, buffer_size:int=io.DEFAULT_BUFFER_SIZE, debug=False):
-    print(f"summarizing {len(kmers):12,d}")
+def process_kmers(
+        kmers: np.ndarray,
+        header: Header,
+        fhd:typing.IO,
+        buffer_size:int=io.DEFAULT_BUFFER_SIZE,
+        tmp_dir:Union[str,None]=None,
+        debug=False):
+
+    print(f"    summarizing {len(kmers):12,d}")
 
     kmers_a = np.array(kmers)
-    kmers.clear()
+
     unique, counts = np.unique(kmers_a, return_counts=True)
-    print("unique      ", unique)
-    print("unique.shape", unique.shape)
-    print("unique.dtype", unique.dtype)
-    print("counts.shape", counts.shape)
-    print("counts.dtype", counts.dtype)
+    if debug:
+        print("unique      ", unique)
+        print("unique.shape", unique.shape)
+        print("unique.dtype", unique.dtype)
+        print("counts      ", counts)
+        print("counts.shape", counts.shape)
+        print("counts.dtype", counts.dtype)
     del kmers_a
 
-    print(f" mem mapping")
+    # print(f" mem mapping")
     fhd.seek(0)
-    npmm = np.memmap(fhd, dtype=np.uint8, mode='r+', offset=header_len, shape=(max_size,))
+    npmm = header.as_array(fhd)
 
     if debug: print("npmm", npmm.shape, npmm.tolist())
 
-    print(f" creating zeros")
     # https://stackoverflow.com/questions/29611185/avoid-overflow-when-adding-numpy-arrays
 
-    with open("zeros.tmp", "w+b", buffering=buffer_size) as fhz: #TODO: Better temp name
-        vals = np.memmap(fhz, dtype=np.uint8, mode='w+', offset=0, shape=(max_size,))
+    with tempfile.TemporaryFile(mode="w+b", buffering=buffer_size, dir=tmp_dir) as fhz: #TODO: Better temp name
+        # print(f" creating zeros")
+        vals = np.memmap(fhz, dtype=np.uint8, mode='w+', offset=0, shape=(header.data_size,))
 
         # vals = np.zeros(npmm.shape[0], dtype=np.uint8) #TODO: Create mmap file: https://stackoverflow.com/questions/32029300/python-numpy-memmap-zeros-reusage-documentation
         vals[unique] = counts
         vals.flush()
         if debug: print("vals", vals.shape, vals.tolist())
 
-        print(f" adding")
-        npmm[:] = npmm + np.minimum(np.iinfo(np.uint8).max - npmm, vals)
+        # print(f" adding")
+        npmm[:] = npmm + np.minimum(header.max_val - npmm, vals)
         if debug: print("npmm", npmm.shape, npmm.tolist())
 
-        print(f" writing")
+        # print(f" writing")
 
         vals._mmap.close()
         del vals
@@ -599,12 +682,16 @@ def process_kmers(kmers: List[int], header_len:int, max_size:int, fhd:typing.IO,
         npmm._mmap.close()
         del npmm
 
-    os.remove("zeros.tmp")
+def create_fasta_index(
+        project_name: str,
+        fasta_file: str,
+        index_file: str,
+        kmer_len: int,
+        overwrite: bool,
+        FLUSH_EVERY:int = 25_000_000,
+        buffer_size:int = io.DEFAULT_BUFFER_SIZE,
+        debug: bool = False) -> None:
 
-    print(f" done")
-    return unique.shape[0]
-
-def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer_len: int, overwrite: bool, buffer_size:int=io.DEFAULT_BUFFER_SIZE, debug: bool = False) -> None:
     header = Header(project_name, fasta_file, kmer_len)
 
     print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} kmer_size {header.kmer_size:14,d} max_size {header.max_size:14,d} bytes {header.max_size//1024:14,d} Kb {header.max_size//1024//1024:14,d} Mb {header.max_size//1024//1024//1024:14,d} Gb")
@@ -627,11 +714,10 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
 
         # https://docs.python.org/3/library/mmap.html
 
-        header_len_l     = header.HEADER_LEN
-        max_size_l       = header.max_size
         num_kmers        = 0
-        num_unique_kmers = 0
-        kmers            = []
+        list_pos         = 0
+        kmers            = np.zeros(dtype=np.uint8, shape=(FLUSH_EVERY,))
+        # kmers            = [None] * FLUSH_EVERY
         last_chrom_num   = None
 
         for chrom_num, name, fwd, rev in gen_kmers(fasta_file, kmer_len):
@@ -639,37 +725,37 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
             pos               = fwd if fwd < rev else rev
             num_kmers        += 1
 
-            if last_chrom_num == chrom_num: #todo: do every N million bp instead of whole chromosomes
-                kmers.append(pos)
-            else:
-                print("new chrom", name)
-
-                if len(kmers) > 0:
-                    num_unique_kmers += process_kmers(kmers, header_len_l, max_size_l, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
-
-                    if (kmer_len <= 5 and DEBUG) or debug:
-                        print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
+            if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
+                if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
+                    print("  new chrom", name)
+                else:
+                    print(f"  {FLUSH_EVERY:14,d} {name}")
 
                 last_chrom_num = chrom_num
-                kmers.clear()
-                kmers.append(pos)
+                if list_pos > 0:
+                    process_kmers(kmers[:list_pos], header, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
-        if len(kmers) > 0:
-            num_unique_kmers += process_kmers(kmers, header_len_l, max_size_l, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
+                    if (kmer_len <= 5 and DEBUG) or debug:
+                        print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d}")
 
+                    list_pos = 0
+                    # break
+
+            kmers[list_pos] = pos
+            list_pos += 1
+
+        if list_pos > 0:
+            process_kmers(kmers[:list_pos], header, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
             if (kmer_len <= 5 and DEBUG) or debug:
                 print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
 
+        del kmers
+        fhd.flush()
+
         header.num_kmers        = num_kmers
-        header.num_unique_kmers = num_unique_kmers
-        
-        fhd.flush()
 
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d}  num_kmers {header.num_kmers:14,d} num_unique_kmers {header.num_unique_kmers:14,d} kmer_size {header.kmer_size:14,d} word_len {header.word_len:14,d} max_size {header.max_size:14,d} hist_sum {header.hist_sum:14,d} hist_uniq {header.hist_uniq:14,d}")
-        if (kmer_len <= 5 and DEBUG) or debug:
-            print(f" hist {header.hist}")
+        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d}  num_kmers {header.num_kmers:14,d} kmer_size {header.kmer_size:14,d}  max_size {header.max_size:14,d}")
 
-        fhd.flush()
         print("  indexing finished")
 
         print("  creating header")
@@ -691,80 +777,32 @@ def create_fasta_index(project_name: str, fasta_file: str, index_file: str, kmer
     print("done")
 
 def read_fasta_index(project_name: str, index_file: str, debug: bool = False) -> None:
-    opener = open
-    if os.path.exists(f"{index_file}.gz"):
-        index_file = index_file + ".gz"
-        opener = gzip.open
+    header   = Header(project_name, None, None)
 
-    header = Header(project_name, None, None, None)
-    header_t = Header(project_name, None, None, None)
-
-    with opener(index_file, "r+b") as fhd:
-        # read header
-        # kmer_len, field_len, f_num_kmers, f_num_unique_kmers, f_hist_sum, f_hist_uniq, *f_hist = struct.unpack_from(HEADER_FMT, f.read(HEADER_LEN))
-
+    with open(index_file, "r+b") as fhd:
         header.read(fhd)
-
-        print(f"project_name       : {header.project_name}")
-        print(f"input_file name    : {header.input_file_name}")
-        print(f"input_file_size    : {header.input_file_size}")
-        print(f"input_file_ctime   : {header.input_file_ctime}")
-        print(f"input_file_cheksum : {header.input_file_cheksum}")
-        print(f"creation_time_start: {header.creation_time_start}")
-        print(f"creation_time_end  : {header.creation_time_end}")
-        print(f"creation_duration  : {header.creation_duration}")
-        print(f"hostname           : {header.hostname}")
-        print(f"checksum_script    : {header.checksum_script}")
+        print(header)
 
         print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} bytes     {header.max_size//1024:14,d} Kb {header.max_size//1024//1024:14,d} Mb {header.max_size//1024//1024//1024:14,d} Gb")
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} num_kmers {header.num_kmers:14,d} num_unique_kmers {header.num_unique_kmers:14,d} kmer_size {header.kmer_size:14,d} word_len {header.word_len:14,d} max_size {header.max_size:14,d} hist_sum {header.hist_sum:14,d} hist_uniq {header.hist_uniq:14,d}")
+        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} num_kmers {header.num_kmers:14,d} kmer_size {header.kmer_size:14,d} max_size {header.max_size:14,d}")
 
-        assert header.bit_mask
-
-        print(f"project_name {project_name} kmer_len {header.kmer_len:14,d} hist_sum {header.hist_sum:14,d} hist_uniq {header.hist_uniq:14,d}")
-        if (header.kmer_len <= 5 and DEBUG) or debug:
-            print(f"  hist {header.hist}")
-
-        fhd.seek(0)
+        header.check(fhd)
+        print("OK")
 
         # https://docs.python.org/3/library/mmap.html
-        mm = mmap.mmap(fhd.fileno(), 0, access=mmap.ACCESS_READ)
+        npmm = header.as_array(fhd)
 
         if (header.kmer_len <= 5 and DEBUG) or debug:
-            fhd.seek(0)
-            mm = mmap.mmap(fhd.fileno(), 0, access=mmap.ACCESS_READ)
-            for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
+            for byte_pos in range(npmm.shape[0]):
+                byte_val = npmm[byte_pos].item()
                 print(byte_val, end=" ")
             print()
 
+        npmm._mmap.close()
+        del npmm
+
         # https://www.programiz.com/python-programming/methods/built-in/memoryview
-        for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
-            # update histogram
-            header_t.hist[byte_val] += 1 if byte_val else 0
-
-            for bit_pos in range(header.word_len):
-                bit_shift       = (bit_pos*header.field_len)           # number of shifts
-                bit_val_mask    = int(header.bit_mask<<bit_shift)      # bit mask
-                bit_val         = byte_val & bit_val_mask       # bit value
-                bit_val_s       = bit_val >> bit_shift          # bit value shifted
-                kmer_pos        = byte_pos * header.word_len + bit_pos # kmer id
-
-                if (header.kmer_len <= 5 and DEBUG) or debug:
-                    print(f"  word_len     {header.word_len:3d} ")
-                    print(f"  byte_pos     {byte_pos    :3d} bit_pos  {bit_pos :3d} bit_shift {bit_shift:3d}")
-                    print(f"  byte_val     {byte_val    :3d} {byte_val    :08b}")
-                    print(f"  bit_val_mask {bit_val_mask:3d} {bit_val_mask:08b}")
-                    print(f"  bit_val      {bit_val     :3d} {bit_val     :08b}")
-                    print(f"  bit_val_s    {bit_val_s   :3d} {bit_val_s   :08b}\n")
-        mm.close()
-
-    print(f"project_name {project_name} kmer_len {header.kmer_len:14,d} hist_sum {header_t.hist_sum:14,d} hist_uniq {header_t.hist_uniq:14,d}")
-    if (header.kmer_len <= 5 and DEBUG) or debug:
-        print(f"  hist {header_t.hist}")
-    
-    assert header.hist_sum  == header_t.hist_sum
-    assert header.hist_uniq == header_t.hist_uniq
-    assert header.hist      == header_t.hist
+        # for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
 
 def run_test(overwrite=False):
     project_name = "example"
@@ -788,7 +826,7 @@ def run_test(overwrite=False):
 
         print(f"project_name {project_name} kmer_len {kmer_len:14,d}")
         create_fasta_index(project_name, fasta_file, index_file, kmer_len, overwrite=overwrite)
-        read_fasta_index(project_name, index_file)
+        # read_fasta_index(project_name, index_file)
 
         print()
 
@@ -808,8 +846,8 @@ def main() -> None:
 
         print(f"project_name {project_name:s} fasta_file {fasta_file:s} index_file {index_file:s} kmer_len {kmer_len:14,d}")
 
-        create_fasta_index(project_name, fasta_file, index_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False, USE_MM=True)
-        
+        create_fasta_index(project_name, fasta_file, index_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
+
         read_fasta_index(project_name, index_file)
 
     print()
