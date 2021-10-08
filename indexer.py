@@ -21,6 +21,8 @@ import tempfile
 from typing import Callable, Generator, Tuple, Union, List
 import typing
 
+import gc
+
 import numpy as np
 
 # TODO
@@ -195,6 +197,11 @@ class Header:
         self.hist_min               = None
         self.hist_max               = None
 
+        self.vals_sum               = None
+        self.vals_count             = None
+        self.vals_min               = None
+        self.vals_max               = None
+
     @property
     def kmer_size(self): return 4 ** self.kmer_len
 
@@ -213,8 +220,15 @@ class Header:
     @property
     def max_val(self): return np.iinfo(np.uint8).max
 
-    def as_array(self, fhd):
-        npmm = np.memmap(fhd, dtype=np.uint8, mode='r+', offset=self.header_len, shape=(self.data_size,))
+    def _get_mmap(self, fhd, offset=0, mode="r+"):
+        return np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,))
+
+    def as_array(self, fhd, mode="r+"):
+        npmm = self._get_mmap(fhd, offset=self.header_len, mode=mode)
+        return npmm
+
+    def get_empty_array(self, fhd, mode="r+"):
+        npmm = self._get_mmap(fhd, offset=0, mode=mode)
         return npmm
 
     def calc_stats(self, fhd):
@@ -247,7 +261,12 @@ class Header:
         self.hostname            = socket.gethostname()
         self.checksum_script     = gen_checksum(os.path.basename(__file__))
 
-    def write(self, fhd):
+    def write(self, fhd, buffer_size : int  = io.DEFAULT_BUFFER_SIZE):
+        _is_filename = False
+        if isinstance(fhd, str):
+            _is_filename = True
+            fhd = open(fhd, "w+b", buffering=buffer_size)
+
         self.update()
         self.calc_stats(fhd)
 
@@ -265,6 +284,10 @@ class Header:
         fhd.seek(self.max_size + 1)
         fhd.write(header_json.encode())
 
+        if _is_filename:
+            fhd.flush()
+            fhd.close()
+
     def read(self, fhd):
         file_ver = fhd.read(len(self.HEADER_VER))
         assert file_ver.decode() == self.file_ver
@@ -275,10 +298,10 @@ class Header:
         for n, k in enumerate(self.HEADER_VAL_NAMES):
             setattr(self, k, vals[n]) 
 
-        # print(f"{'kmer_len ':20s}: {self.kmer_len :14,d}")
-        # print(f"{'kmer_size':20s}: {self.kmer_size:14,d}")
-        # print(f"{'data_size':20s}: {self.data_size:14,d}")
-        # print(f"{'max_size ':20s}: {self.max_size :14,d}")
+        # print(f"{'kmer_len ':20s}: {self.kmer_len :15,d}")
+        # print(f"{'kmer_size':20s}: {self.kmer_size:15,d}")
+        # print(f"{'data_size':20s}: {self.data_size:15,d}")
+        # print(f"{'max_size ':20s}: {self.max_size :15,d}")
 
         fhd.seek(self.HEADER_LEN + self.data_size + 1)
         header_json = fhd.read().decode()
@@ -541,9 +564,9 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, i
                 if bp_num // print_every > bp_last_e:
                     timer.update(bp_num)
                     bp_last_e   = bp_num // print_every
-                    print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
-                    print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
-                    print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
+                    print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
+                    print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+                    print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
                 seq_str  = (ord(s) for b in seq for s in b)
                 seq_str  = tuple(conv[s] for s in seq_str)
                 seq_len  = len(seq_str)
@@ -556,18 +579,18 @@ def parse_fasta(fhd, print_every: int=25_000_000) -> Generator[Tuple[str, str, i
             seq.append(line)
 
     if seq_name is not None:
-        print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
-        print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
-        print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
+        print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
+        print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+        print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
         seq_str  = (ord(s) for b in seq for s in b)
         seq_str  = tuple(conv[s] for s in seq_str)
         seq_len  = len(seq_str)
         bp_num  += seq_len
         yield seq_name, seq_str, seq_len
 
-    print(f"seq_name: {'DONE'  :25s} seq_num   : {seq_num        :14,d} line_num  : {line_num          :14,d}")
-    print(f"          {''      :25s} bp_num    : {timer.val_last :14,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :14,d} bp/s")
-    print(f"          {''      :25s} bp_delta  : {timer.val_delta:14,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:14,d} bp/s")
+    print(f"seq_name: {'DONE'  :25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
+    print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+    print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
 
 def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str, int], None, None]:
     filehandler = None
@@ -604,7 +627,7 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
     for num, (name, seq, seq_len) in enumerate(read_fasta(fasta_file)):
         # mm = None
         # print(f"{num+1:11,d} {name}")
-        print(f"{num+1:03d} {name} {seq_len:14,d}")
+        print(f"{num+1:03d} {name} {seq_len:15,d}")
 
         ints:List[Union[int,None]] = []
         fwd:int = 0
@@ -621,7 +644,7 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
                 rev += pos_val[kmer_len-p-1]*(3-i)
 
             # print(f"{num+1:03d} {name} {i} {kmer} {ints} {ints_p} {fwd:03d} {stni} {stni_p} {rev:03d}")
-            # print(f"{num+1:03d} {name} {seq} {fwd:03d} {rev:03d}")
+            # print(f"{num+1:03d} {name} {fwd:03d} {rev:03d} {ints}")
             # print(" ints   ", ints)
             # print(" stni   ", stni)
             # print(" pos_val", pos_val)
@@ -631,70 +654,125 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
             yield num, name, fwd, rev
 
 def process_kmers(
-        kmers: np.ndarray,
-        header: Header,
-        fhd:typing.IO,
-        buffer_size:int=io.DEFAULT_BUFFER_SIZE,
-        tmp_dir:Union[str,None]=None,
-        debug=False):
+        kmers      : np.ndarray,
+        header     : Header,
+        index_file : str,
+        buffer_size: int             = io.DEFAULT_BUFFER_SIZE,
+        frag_size  : int             = 1_000_000_000,
+        debug      : bool            = False):
 
-    print(f"    summarizing {len(kmers):12,d}")
+    print(f"    summarizing    {len(kmers):15,d}")
+    # print(f"      kmers.shape  {kmers.shape}")
+    unique, counts = np.unique(kmers, return_counts=True)
 
-    kmers_a = np.array(kmers)
-
-    unique, counts = np.unique(kmers_a, return_counts=True)
+    # print(f"      unique.shape {unique.shape}")
+    # print(f"      unique.min   {np.min(unique):15,d}")
+    # print(f"      unique.max   {np.max(unique):15,d}")
+    # print(f"      counts.shape {counts.shape}")
+    # print(f"      counts.min   {np.min(counts):15,d}")
+    # print(f"      counts.max   {np.max(counts):15,d}")
+    # print(f"      counts.sum   {np.sum(counts):15,d}")
     if debug:
-        print("unique      ", unique)
-        print("unique.shape", unique.shape)
-        print("unique.dtype", unique.dtype)
-        print("counts      ", counts)
-        print("counts.shape", counts.shape)
-        print("counts.dtype", counts.dtype)
-    del kmers_a
-
-    # print(f" mem mapping")
-    fhd.seek(0)
-    npmm = header.as_array(fhd)
-
-    if debug: print("npmm", npmm.shape, npmm.tolist())
+        print( "      unique      ", unique)
+        print( "      counts      ", counts)
+    # del kmers_a
+    gc.collect()
+    sys.stdout.flush()
 
     # https://stackoverflow.com/questions/29611185/avoid-overflow-when-adding-numpy-arrays
 
-    with tempfile.TemporaryFile(mode="w+b", buffering=buffer_size, dir=tmp_dir) as fhz: #TODO: Better temp name
-        # print(f" creating zeros")
-        vals = np.memmap(fhz, dtype=np.uint8, mode='w+', offset=0, shape=(header.data_size,))
+    if frag_size > header.data_size: frag_size = header.data_size
 
-        # vals = np.zeros(npmm.shape[0], dtype=np.uint8) #TODO: Create mmap file: https://stackoverflow.com/questions/32029300/python-numpy-memmap-zeros-reusage-documentation
-        vals[unique] = counts
-        vals.flush()
-        if debug: print("vals", vals.shape, vals.tolist())
+    print(f"    creating zeros")
+    sys.stdout.flush()
 
-        # print(f" adding")
-        npmm[:] = npmm + np.minimum(header.max_val - npmm, vals)
-        if debug: print("npmm", npmm.shape, npmm.tolist())
+    for frag_from in range(0, header.data_size, frag_size):
+        frag_to   = frag_from + frag_size
+        if frag_to > header.data_size: frag_to = header.data_size
+        if frag_from == frag_to: break
 
-        # print(f" writing")
+        print(f"        adding [{frag_from:16,d}:{frag_to:16,d}] out of {header.data_size:16,d} [{frag_to-frag_from:16,d}] - {frag_to / header.data_size * 100.0:6.2f} %")
 
-        vals._mmap.close()
-        del vals
+        unique_w = np.where((unique >= frag_from) & (unique < frag_to))[0]
+        unique_f = unique[unique_w]
+        counts_f = counts[unique_w]
 
-        npmm.flush()
-        npmm._mmap.close()
-        del npmm
+        # print("        unique_w       ", unique_w)
+        # print("        unique_w.shape ", unique_w.shape)
+        # print("        unique_w.min   ", np.min(unique_w))
+        # print("        unique_w.max   ", np.max(unique_w))
+
+        # print("        unique_f       ", unique_f)
+        # print("        unique_f.shape ", unique_f.shape)
+        # print("        unique_f.min   ", np.min(unique_f))
+        # print("        unique_f.max   ", np.max(unique_f))
+
+        # print("        counts_f       ", counts_f)
+        # print("        counts_f.shape ", counts_f.shape)
+        # print("        counts_f.min   ", np.min(counts_f))
+        # print("        counts_f.max   ", np.max(counts_f))
+        # print("        counts_f.sum   ", np.sum(counts_f))
+
+        vals_sum  = np.sum(counts_f)
+
+        if  vals_sum == 0:
+            print("          zeroes")
+            sys.stdout.flush()
+        else:
+            # print("          saving")
+
+            counts_f[counts_f > header.max_val] = header.max_val
+
+            # print("        counts_f       ", counts_f)
+            # print("        counts_f.shape ", counts_f.shape)
+            # print("        counts_f.min   ", np.min(counts_f))
+            # print("        counts_f.max   ", np.max(counts_f))
+            # print("        counts_f.sum   ", np.sum(counts_f))
+
+            vals_frag                       = np.zeros(frag_to-frag_from, dtype=np.uint8)
+            vals_frag[unique_f - frag_from] = counts_f.astype(np.uint8)
+
+            # print("        vals_frag      ", vals_frag)
+            # print("        vals_frag.shape", vals_frag.shape)
+            # print("        vals_frag.min  ", np.min(vals_frag))
+            # print("        vals_frag.max  ", np.max(vals_frag))
+            # print("        vals_frag.sum  ", np.sum(vals_frag))
+
+            sys.stdout.flush()
+            with open(index_file, "w+b", buffering=buffer_size) as fhd:
+                npmm      = header.as_array(fhd)
+
+                npmm_frag = npmm[frag_from:frag_to]
+                npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
+
+                del npmm_frag
+                del npmm
+                fhd.flush()
+                gc.collect()
+
+            del vals_frag
+            gc.collect()
+
+        del unique_w
+        del unique_f
+        del counts_f
+        gc.collect()
 
 def create_fasta_index(
-        project_name: str,
-        fasta_file: str,
-        index_file: str,
-        kmer_len: int,
-        overwrite: bool,
-        FLUSH_EVERY:int = 25_000_000,
-        buffer_size:int = io.DEFAULT_BUFFER_SIZE,
-        debug: bool = False) -> None:
+        project_name : str,
+        fasta_file   : str,
+        index_file   : str,
+        kmer_len     : int,
+        overwrite    : bool,
+        FLUSH_EVERY  : int  =   100_000_000,
+        max_frag_size: int  = 1_000_000_000,
+        buffer_size  : int  = io.DEFAULT_BUFFER_SIZE,
+        debug        : bool = False) -> None:
 
     header = Header(project_name, fasta_file, kmer_len)
 
-    print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} kmer_size {header.kmer_size:14,d} max_size {header.max_size:14,d} bytes {header.max_size//1024:14,d} Kb {header.max_size//1024//1024:14,d} Mb {header.max_size//1024//1024//1024:14,d} Gb")
+    print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d} bytes {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
+    # print(header)
 
     if os.path.exists(index_file) and overwrite:
         os.remove(index_file)
@@ -710,58 +788,60 @@ def create_fasta_index(
         fhd.seek(header.max_size - 1)
         fhd.write(b'\0')
         # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
-        fhd.seek(0)
 
-        # https://docs.python.org/3/library/mmap.html
+    # https://docs.python.org/3/library/mmap.html
 
-        num_kmers        = 0
-        list_pos         = 0
-        kmers            = np.zeros(dtype=np.uint8, shape=(FLUSH_EVERY,))
-        # kmers            = [None] * FLUSH_EVERY
-        last_chrom_num   = None
+    num_kmers        = 0
+    list_pos         = 0
+    kmers            = np.zeros(dtype=np.uint64, shape=(FLUSH_EVERY,))
+    # kmers            = [None] * FLUSH_EVERY
+    last_chrom_num   = None
+    frag_size        = header.data_size // 10
+    if frag_size > max_frag_size: frag_size = max_frag_size
 
-        for chrom_num, name, fwd, rev in gen_kmers(fasta_file, kmer_len):
-        # for chrom_num, name, pos, count, mm in gen_kmers(fasta_file, kmer_len, opener):
-            pos               = fwd if fwd < rev else rev
-            num_kmers        += 1
+    # for chrom_num, name, pos, count, mm in gen_kmers(fasta_file, kmer_len, opener):
+    for chrom_num, name, fwd, rev in gen_kmers(fasta_file, kmer_len):
+        pos               = fwd if fwd < rev else rev
+        num_kmers        += 1
 
-            if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
-                if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
-                    print("  new chrom", name)
-                else:
-                    print(f"  {FLUSH_EVERY:14,d} {name}")
+        if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
+            if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
+                print(f"  new chrom {name} {list_pos:15,d}")
+            else:
+                print(f"  {FLUSH_EVERY:15,d} {name} {list_pos:15,d}")
 
-                last_chrom_num = chrom_num
-                if list_pos > 0:
-                    process_kmers(kmers[:list_pos], header, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
+            last_chrom_num = chrom_num
+            if list_pos > 0:
+                process_kmers(kmers[:list_pos], header, index_file_tmp, buffer_size=buffer_size, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
-                    if (kmer_len <= 5 and DEBUG) or debug:
-                        print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d}")
+                if (kmer_len <= 5 and DEBUG) or debug:
+                    print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d}")
 
-                    list_pos = 0
-                    # break
+                list_pos = 0
+                break
 
-            kmers[list_pos] = pos
-            list_pos += 1
+        kmers[list_pos] = pos
+        list_pos += 1
 
-        if list_pos > 0:
-            process_kmers(kmers[:list_pos], header, fhd, buffer_size=buffer_size, debug=(kmer_len <= 5 and DEBUG) or debug)
-            if (kmer_len <= 5 and DEBUG) or debug:
-                print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
+    if list_pos > 0:
+        process_kmers(kmers[:list_pos], header, index_file_tmp, buffer_size=buffer_size, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
+        if (kmer_len <= 5 and DEBUG) or debug:
+            print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d} word_len     {header.word_len    :3d} ")
 
-        del kmers
-        fhd.flush()
+    del kmers
+    gc.collect()
 
-        header.num_kmers        = num_kmers
+    header.num_kmers        = num_kmers
 
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d}  num_kmers {header.num_kmers:14,d} kmer_size {header.kmer_size:14,d}  max_size {header.max_size:14,d}")
+    print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d}  num_kmers {header.num_kmers:15,d} kmer_size {header.kmer_size:15,d}  max_size {header.max_size:15,d}")
 
-        print("  indexing finished")
+    print("  indexing finished")
 
-        print("  creating header")
+    print("  creating header")
+    with open(index_file_tmp, "w+b", buffering=buffer_size) as fhd:
         header.write(fhd)
-        print("  header saved")
-        print("  DONE")
+    print("  header saved")
+    print("  DONE")
 
     print("renaming")
     os.rename(index_file_tmp, index_file)
@@ -783,8 +863,8 @@ def read_fasta_index(project_name: str, index_file: str, debug: bool = False) ->
         header.read(fhd)
         print(header)
 
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} bytes     {header.max_size//1024:14,d} Kb {header.max_size//1024//1024:14,d} Mb {header.max_size//1024//1024//1024:14,d} Gb")
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:14,d} num_kmers {header.num_kmers:14,d} kmer_size {header.kmer_size:14,d} max_size {header.max_size:14,d}")
+        print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} bytes     {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
+        print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} num_kmers {header.num_kmers:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d}")
 
         header.check(fhd)
         print("OK")
@@ -818,13 +898,13 @@ def run_test(overwrite=False):
 
 
     for kmer_len in kmer_lens:
-        print(f"project_name {project_name} kmer_len {kmer_len:14,d}")
+        print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
         fasta_file = f"{project_name}-{kmer_len:02d}.fasta.gz"
         # fasta_file = None # None for stdin
 
         index_file = f"{project_name}-{kmer_len:02d}.fasta.gz.{kmer_len:02d}.bin"
 
-        print(f"project_name {project_name} kmer_len {kmer_len:14,d}")
+        print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
         create_fasta_index(project_name, fasta_file, index_file, kmer_len, overwrite=overwrite)
         # read_fasta_index(project_name, index_file)
 
@@ -844,7 +924,7 @@ def main() -> None:
         buffer_size = 2**16
         # buffer_size = io.DEFAULT_BUFFER_SIZE
 
-        print(f"project_name {project_name:s} fasta_file {fasta_file:s} index_file {index_file:s} kmer_len {kmer_len:14,d}")
+        print(f"project_name {project_name:s} fasta_file {fasta_file:s} index_file {index_file:s} kmer_len {kmer_len:15,d}")
 
         create_fasta_index(project_name, fasta_file, index_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
 
