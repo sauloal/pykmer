@@ -110,8 +110,9 @@ for pos, nuc in enumerate(ALFA):
 # HEADER_FMT = '<' + 'B'*2 + 'Q'*4 + 'Q'*(2**8)
 # HEADER_LEN = struct.calcsize(HEADER_FMT)
 
-Datetime = NewType('Datetime', datetime.datetime)
-Hist     = NewType('Hist'    , List[int])
+Datetime    = NewType('Datetime'   , datetime.datetime)
+Hist        = NewType('Hist'       , List[int])
+Chromosomes = NewType('Chromosomes', List[Tuple[str, int]])
 
 
 class Timer:
@@ -175,35 +176,35 @@ class Header:
     ]
 
     def __init__(self, project_name: str, input_file_name: str, kmer_len: int):
-        self.project_name          :str       = project_name
-        self.input_file_name       :str       = input_file_name
-        self.kmer_len              :int       = kmer_len
+        self.project_name          :str         = project_name
+        self.input_file_name       :str         = input_file_name
+        self.kmer_len              :int         = kmer_len
 
-        self.input_file_size       :int       = None
-        self.input_file_ctime      :float     = None
-        self.input_file_cheksum    :str       = None
+        self.input_file_size       :int         = None
+        self.input_file_ctime      :float       = None
+        self.input_file_cheksum    :str         = None
 
-        self.num_kmers             :int       = None
-        self.chromosomes           :Dict[str, int] = None
+        self.num_kmers             :int         = None
+        self.chromosomes           :Chromosomes = None
 
-        self._creation_time_start_t:Datetime  = datetime.datetime.now()
-        self.creation_time_start   :str       = None
-        self.creation_time_end     :str       = None
-        self.creation_duration     :str       = None
+        self._creation_time_start_t:Datetime    = datetime.datetime.now()
+        self.creation_time_start   :str         = None
+        self.creation_time_end     :str         = None
+        self.creation_duration     :str         = None
 
-        self.hostname              :str       = None
-        self.checksum_script       :str       = None
+        self.hostname              :str         = None
+        self.checksum_script       :str         = None
 
-        self.hist                  :Hist      = None
-        self.hist_sum              :int       = None
-        self.hist_count            :int       = None
-        self.hist_min              :int       = None
-        self.hist_max              :int       = None
+        self.hist                  :Hist        = None
+        self.hist_sum              :int         = None
+        self.hist_count            :int         = None
+        self.hist_min              :int         = None
+        self.hist_max              :int         = None
 
-        self.vals_sum              :int       = None
-        self.vals_count            :int       = None
-        self.vals_min              :int       = None
-        self.vals_max              :int       = None
+        self.vals_sum              :int         = None
+        self.vals_count            :int         = None
+        self.vals_min              :int         = None
+        self.vals_max              :int         = None
 
     @property
     def kmer_size(self) -> int: return 4 ** self.kmer_len
@@ -249,7 +250,7 @@ class Header:
 
     def calc_stats(self, fhd: BinaryIO) -> None:
         arr             = self.as_array(fhd)
-        hist_v, _       = np.histogram(arr, bins=self.max_val, range=(0,self.max_val))
+        hist_v, _       = np.histogram(arr, bins=self.max_val, range=(1,self.max_val))
 
         self.hist       = hist_v.tolist()
         # print(self.hist)
@@ -775,11 +776,11 @@ def process_kmers(
             with open(index_file, "r+b", buffering=buffer_size) as fhd:
                 npmm                    = header.as_array(fhd)
                 npmm_frag               = npmm[frag_from:frag_to]
-                hist_before             = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(0,np.iinfo(np.uint8).max))[0]
+                hist_before             = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
                 npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
-                hist_after              = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(0,np.iinfo(np.uint8).max))[0]
+                hist_after              = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
                 
-                if hist is None: hist_before[0] = 2 * np.iinfo(np.uint8).max + 2
+                # if hist is None: hist_before[0] = 2 * np.iinfo(np.uint8).max + 2
                 hist_diff               = hist_after - hist_before
 
                 if debug:
@@ -858,7 +859,7 @@ def create_fasta_index(
     if frag_size > header.data_size: frag_size = header.data_size
 
     # for chrom_num, name, pos, count, mm in gen_kmers(fasta_file, kmer_len, opener):
-    chromosomes = {}
+    chromosomes = []
     for chrom_num, name, seq_len, fwd, rev in gen_kmers(fasta_file, kmer_len):
         pos               = fwd if fwd < rev else rev
         num_kmers        += 1
@@ -866,7 +867,7 @@ def create_fasta_index(
         if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
             if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
                 print(f"  new chrom {name} {list_pos:15,d}")
-                chromosomes[name] = seq_len #todo: ignore if fastq file
+                chromosomes.append((name, seq_len)) #todo: ignore if fastq file
             else:
                 print(f"  {FLUSH_EVERY:15,d} {name} {list_pos:15,d}")
 
