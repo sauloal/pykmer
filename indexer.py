@@ -750,6 +750,7 @@ def process_kmers(
         if  vals_sum == 0:
             print("          zeroes")
             sys.stdout.flush()
+
         else:
             # print("          saving")
             # sys.stdout.flush()
@@ -821,8 +822,8 @@ def create_fasta_index(
         kmer_len     : int,
         overwrite    : bool,
         FLUSH_EVERY  : int  =   100_000_000,
-        max_frag_size: int  = 1_000_000_000,
         min_frag_size: int  =   500_000_000,
+        max_frag_size: int  = 1_000_000_000,
         buffer_size  : int  = io.DEFAULT_BUFFER_SIZE,
         debug        : bool = False) -> None:
 
@@ -866,7 +867,7 @@ def create_fasta_index(
 
         if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
             if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
-                print(f"  new chrom {name} {list_pos:15,d}")
+                print(f"  new chrom {name} {chrom_num:03d} {list_pos:15,d}")
                 chromosomes.append((name, seq_len)) #todo: ignore if fastq file
             else:
                 print(f"  {FLUSH_EVERY:15,d} {name} {list_pos:15,d}")
@@ -885,7 +886,7 @@ def create_fasta_index(
                     print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d}")
 
                 list_pos = 0
-                # break
+                # if chrom_num == 3: break
 
         kmers[list_pos] = pos
         list_pos += 1
