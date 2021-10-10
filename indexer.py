@@ -74,18 +74,18 @@ import numpy as np
     K=19
 
 
-    K=15; F=S_lycopersicum_chromosomes.4.00.fa.gz.$K.bin; bgzip -i -I $F.gz.gzi -l 9 -c $F > $F.gz
+    K=15; F=S_lycopersicum_chromosomes.4.00.fa.gz.$K.kin; bgzip -i -I $F.gz.gzi -l 9 -c $F > $F.gz
 
     time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15
             real         speed         size  bgzip
-    K= 3                                 2K
-    K= 5                                 3K
-    K= 7
+    K= 3    16m21.205s   797,621 bp/s    2K   69b
+    K= 5    16m 6.006s   809,751 bp/s    3K   94b
+    K= 7    16m27.471s   787,715 bp/s   16K  287b
     K= 9
     K=11
     K=13
-    K=15  29m3.686s    481,910 bp/s      1G  156M
-    K=17               202,825 bp/s     17G
+    K=15  29m 3.686s   481,910 bp/s      1G  156M
+    K=17  88m12.597s   167,771 bp/s     17G  574M
     X K=19                             257G
     X K=21                               4T
 """
@@ -169,15 +169,17 @@ class Timer:
 
 
 class Header:
-    HEADER_VER      : bytes     = b'KMER001'
-    HEADER_VAL_FMT  : str       = '<Q'
-    HEADER_VAL_SIZE : int       = struct.calcsize(HEADER_VAL_FMT)
+    HEADER_VER      : bytes     = 1
+    # HEADER_VER      : bytes     = b'KMER001'
+    # HEADER_VAL_FMT  : str       = '<Q'
+    # HEADER_VAL_SIZE : int       = struct.calcsize(HEADER_VAL_FMT)
     HEADER_VAL_NAMES: List[str] = ['kmer_len']
-    HEADER_LEN      : int       = len(HEADER_VER) + HEADER_VAL_SIZE
+    # HEADER_LEN      : int       = len(HEADER_VER) + HEADER_VAL_SIZE
     HEADER_DATA     : List[str] = [
         "project_name"       ,
         "kmer_len"           ,
-        "input_file_name"    , "input_file_size"  , "input_file_ctime" , "input_file_cheksum",
+        "input_file_name"    , "input_file_size"  , "input_file_ctime" , "input_file_cheksum" ,
+                               "output_file_size" , "output_file_ctime", "output_file_cheksum",
         "num_kmers"          , "chromosomes"      ,
         "creation_time_start", "creation_time_end", "creation_duration",
         "hostname"           , "checksum_script"  ,
@@ -185,15 +187,35 @@ class Header:
         "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
         "vals_sum"           , "vals_count"       , "vals_min"         , "vals_max"
     ]
+    EXT = 'kin'
+    TMP = 'tmp'
 
-    def __init__(self, project_name: str, input_file_name: str, kmer_len: int):
-        self.project_name          :str         = project_name
-        self.input_file_name       :str         = input_file_name
-        self.kmer_len              :int         = kmer_len
+    def __init__(self,
+            project_name   : str,
+            input_file     : Union[str, None] = None,
+            kmer_len       : Union[int, None] = None,
+            index_file     : Union[str, None] = None,
+            buffer_size    : int = io.DEFAULT_BUFFER_SIZE):
+
+        self.project_name   :str         = project_name
+        self.input_file_name:str         = input_file
+        self.kmer_len       :int         = kmer_len
+        self._buffer_size   :int         = buffer_size
+
+        if index_file is not None:
+            self._parse_index_file_name(index_file)
+
+        assert self.kmer_len
+        assert self.kmer_len > 0
+        assert self.kmer_len % 2 == 1
 
         self.input_file_size       :int         = None
         self.input_file_ctime      :float       = None
         self.input_file_cheksum    :str         = None
+
+        self.ouput_file_size       :int         = None
+        self.ouput_file_ctime      :float       = None
+        self.ouput_file_cheksum    :str         = None
 
         self.num_kmers             :int         = None
         self.chromosomes           :Chromosomes = None
@@ -218,49 +240,49 @@ class Header:
         self.vals_max              :int         = None
 
     @property
+    def index_file(self) -> str: return f"{self.input_file_name}.{self.kmer_len:02d}.{self.EXT}"
+
+    @property
+    def index_tmp_file(self) -> str: return f"{self.index_file}.{self.TMP}"
+
+    @property
+    def metadata_file(self) -> str: return f"{self.index_file}.json"
+
+    @property
     def kmer_size(self) -> int: return 4 ** self.kmer_len
 
     @property
     def data_size(self) -> int: return self.kmer_size
 
     @property
-    def max_size(self) -> int: return self.HEADER_LEN + self.data_size
+    def max_size(self) -> int: return self.data_size
 
     @property
-    def file_ver(self) -> str: return self.HEADER_VER.decode()
-
-    @property
-    def header_len(self) -> int: return self.HEADER_LEN
+    def file_ver(self) -> str: return self.HEADER_VER
 
     @property
     def max_val(self) -> int: return np.iinfo(np.uint8).max
 
-    def _get_mmap(self, fhd: BinaryIO, offset=0, mode="r+") -> np.memmap:
+    # @property
+    # def header_len(self) -> int: return self.HEADER_LEN
+
+    def _parse_index_file_name(self, index_file):
+        ext = index_file[(2 + 1) + (len(self.EXT) + 1) * -1:]
+
+        if self.input_file_name is None:
+            self.input_file_name = ext[len(self.EXT) * -1:]
+        
+        if self.kmer_len is None:
+            self.kmer_len        = int(ext[1:3])
+
+    def _get_mmap(self, fhd: BinaryIO, offset: int = 0, mode: str ="r+") -> np.memmap:
         return np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,))
 
-    def open_file(self, index_file: str, mode: str = "r+b", buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> BinaryIO:
-        return open(index_file, mode, buffering=buffer_size)
 
-    def init_file(self, index_file: str, mode: str = "r+b", buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> None:
-        # print("opening")
-        if not os.path.exists(index_file):
-            with open(index_file, 'w'):
-                pass
-        with self.open_file(index_file, mode=mode, buffer_size=buffer_size) as fhd:
-            fhd.seek(self.max_size - 1)
-            fhd.write(b'\0')
-        # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
+    def update_stats(self, fhd: BinaryIO) -> None:
+        print("updating stats")
 
-    def as_array(self, fhd: BinaryIO, mode: str = "r+") -> np.memmap:
-        npmm = self._get_mmap(fhd, offset=self.header_len, mode=mode)
-        return npmm
-
-    def get_empty_array(self, fhd: BinaryIO, mode: str = "r+") -> np.memmap:
-        npmm = self._get_mmap(fhd, offset=0, mode=mode)
-        return npmm
-
-    def calc_stats(self, fhd: BinaryIO) -> None:
-        arr             = self.as_array(fhd)
+        arr             = self.get_array_from_fhd(fhd)
         hist_v, _       = np.histogram(arr, bins=self.max_val, range=(1,self.max_val))
 
         self.hist       = hist_v.tolist()
@@ -276,71 +298,115 @@ class Header:
         self.vals_min   = np.min(arr).item()
         self.vals_max   = np.max(arr).item()
 
-    def update(self) -> None:
-        time_end                 = datetime.datetime.now()
+    def update_stats_index_file(self) -> None:
+        with self.open_index_file() as fhd:
+            self.update_stats(fhd)
+
+    def update_stats_index_tmp_file(self) -> None:
+        with self.open_index_tmp_file() as fhd:
+            self.update_stats(fhd)
+
+
+    def update_metadata(self, index_file) -> None:
+        print("updating metadata")
 
         self.input_file_size     = os.path.getsize(self.input_file_name)
         self.input_file_ctime    = os.path.getctime(self.input_file_name)
         self.input_file_cheksum  = gen_checksum(self.input_file_name)
 
-        self.creation_time_start = str(self._creation_time_start_t)
-        self.creation_time_end   = str(time_end)
-        self.creation_duration   = str(time_end - self._creation_time_start_t)
+        self.output_file_size    = os.path.getsize(index_file)
+        self.output_file_ctime   = os.path.getctime(index_file)
+        self.output_file_cheksum = gen_checksum(index_file)
 
         self.hostname            = socket.gethostname()
         self.checksum_script     = gen_checksum(os.path.basename(__file__))
 
-    def write(self, fhd: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> None:
-        _is_filename = False
+        time_end                 = datetime.datetime.now()
+        self.creation_time_start = str(self._creation_time_start_t)
+        self.creation_time_end   = str(time_end)
+        self.creation_duration   = str(time_end - self._creation_time_start_t)
 
-        if isinstance(fhd, str):
-            _is_filename = True
-            fhd = open(fhd, "w+b", buffering=buffer_size)
 
+    def open_file(self, index_file: str, mode: str = "r+b") -> BinaryIO:
+        return open(index_file, mode, buffering=self._buffer_size)
+
+    def open_index_file(self, mode: str = "r+b") -> BinaryIO:
+        return self.open_file(self.index_file, mode=mode)
+
+    def open_index_tmp_file(self, mode: str = "r+b") -> BinaryIO:
+        return self.open_file(self.index_tmp_file, mode=mode)
+
+
+    def _init_clean(self, overwrite: bool=False) -> None:
+        if os.path.exists(self.index_file):
+            if overwrite:
+                os.remove(self.index_file)
+            else:
+                raise ValueError(f"file {self.index_file} already exists and overwritting disabled")
+
+        if os.path.exists(self.metadata_file):
+            os.remove(self.metadata_file)
+
+        if os.path.exists(self.index_tmp_file):
+            os.remove(self.index_tmp_file)
+
+    def init_file(self, index_file: str, mode: str = "r+b") -> None:
+        # print("opening")
+        if not os.path.exists(index_file):
+            with open(index_file, 'w'):
+                pass
+
+        with self.open_file(index_file, mode=mode) as fhd:
+            fhd.seek(self.max_size - 1)
+            fhd.write(b'\0')
+        # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
+
+    def init_index_file(self, overwrite: bool=False, mode: str = "r+b"):
+        self._init_clean(self, overwrite=overwrite)
+        return self.init_file(self.index_file, mode=mode)
+
+    def init_index_tmp_file(self, overwrite: bool=False, mode: str = "r+b"):
+        self._init_clean(overwrite=overwrite)
+        return self.init_file(self.index_tmp_file, mode=mode)
+
+
+    def get_array_from_fhd(self, fhd: BinaryIO, mode: str = "r+") -> np.memmap:
+        npmm = self._get_mmap(fhd, offset=0, mode=mode)
+        return npmm
+
+    def get_array_from_index_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> np.memmap:
+        with self.open_index_file(mode=fhd_mode) as fhd:
+            yield self.get_array_from_fhd(fhd, mode=mm_mode)
+
+    def get_array_from_index_tmp_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> np.memmap:
+        with self.open_index_tmp_file(mode=fhd_mode) as fhd:
+            yield self.get_array_from_fhd(fhd, mode=mm_mode)
+
+
+    def write_metadata_file(self, index_file: str) -> None:
         assert self.num_kmers
         assert self.chromosomes
 
-        self.update()
-        self.calc_stats(fhd)
+        self.update_metadata(index_file)
+        with self.open_file(index_file) as fhd:
+            self.update_stats(fhd)
 
         header_data = {k: getattr(self,k) for k in self.HEADER_DATA}
 
-        header_json = json.dumps(header_data, indent=None, sort_keys=1, separators=(',', ':'))
+        with open(self.metadata_file, 'wt') as fhm:
+            json.dump(header_data, fhm, indent=1, sort_keys=1)
 
-        fhd.seek(0)
-        fhd.write(self.HEADER_VER)
+    def write_metadata_index_file(self) -> None:
+        self.write_metadata_file(self.index_file)
 
-        ba = bytearray(self.HEADER_VAL_SIZE)
-        struct.pack_into(self.HEADER_VAL_FMT, ba, 0, *(getattr(self, k) for k in self.HEADER_VAL_NAMES))
-        fhd.write(ba)
+    def write_metadata_index_tmp_file(self) -> None:
+        self.write_metadata_file(self.index_tmp_file)
 
-        fhd.seek(self.max_size + 1)
-        fhd.write(header_json.encode())
 
-        if _is_filename:
-            fhd.flush()
-            fhd.close()
+    def read_metadata(self):
+        with open(self.metadata_file, 'rt') as fhd:
+            header_data = json.load(fhd)
 
-    def read(self, fhd: BinaryIO) -> None:
-        file_ver = fhd.read(len(self.HEADER_VER))
-        assert file_ver.decode() == self.file_ver, f"file_ver differs: {file_ver.decode()} == {self.file_ver}"
-
-        # print(f"{'file_ver':20s}: {file_ver.decode()}")
-
-        vals = struct.unpack_from(self.HEADER_VAL_FMT, fhd.read(self.HEADER_VAL_SIZE))
-        for n, k in enumerate(self.HEADER_VAL_NAMES):
-            setattr(self, k, vals[n]) 
-
-        # print(f"{'kmer_len ':20s}: {self.kmer_len :15,d}")
-        # print(f"{'kmer_size':20s}: {self.kmer_size:15,d}")
-        # print(f"{'data_size':20s}: {self.data_size:15,d}")
-        # print(f"{'max_size ':20s}: {self.max_size :15,d}")
-
-        fhd.seek(self.HEADER_LEN + self.data_size + 1)
-        header_json = fhd.read().decode()
-        # print(header_json)
-
-        header_data = json.loads(header_json)
         # print(header_data)
 
         for k in self.HEADER_DATA:
@@ -348,20 +414,18 @@ class Header:
             # print(f"{k:20s}: {str(v)[:50]}")
             setattr(self, k, v)
 
-        fhd.seek(0)
 
-    def check(self, fhd: BinaryIO) -> None:
-        self.read(fhd)
+    def check_data(self, fhd: BinaryIO) -> None:
+        self.read_metadata()
 
         other = self.__class__(self.project_name, self.input_file_name, self.kmer_len)
-        other.read(fhd)
-
+        other.read_metadata()
         assert self.project_name     == other.project_name
         assert self.input_file_name  == other.input_file_name
         assert self.kmer_len         == other.kmer_len
         assert self.num_kmers        == other.num_kmers
 
-        other.calc_stats(fhd)
+        other.update_stats(fhd)
         assert self.hist             == other.hist
         assert self.hist_sum         == other.hist_sum
         assert self.hist_count       == other.hist_count
@@ -374,6 +438,17 @@ class Header:
 
         del other
 
+    def check_data_file(self, filename: str) -> None:
+        with self.open_file(filename, mode="r+b") as fhd:
+            self.check_data(fhd)
+
+    def check_data_index(self) -> None:
+        self.check_data_file(self.index_file)
+
+    def check_data_index_tmp(self) -> None:
+        self.check_data_file(self.index_tmp_file)
+
+
     def __str__(self) -> str:
         res = []
         for k in ["file_ver", "kmer_len", "kmer_size", "data_size", "max_size"] + self.HEADER_DATA:
@@ -385,7 +460,7 @@ class Header:
         return "\n".join(res) + "\n"
 
 
-def gen_checksum(filename: str, chunk_size: int = 65536) -> str:
+def gen_checksum(filename: str, chunk_size: int = 2**16) -> str:
     file_hash = hashlib.sha256()
     with open(filename, "rb") as f:
         chunk = f.read(chunk_size)
@@ -625,27 +700,27 @@ def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Generator[Tuple[s
     print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
     print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
 
-def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str, int], None, None]:
+def read_fasta(input_file: Union[str, None]) -> Generator[Tuple[str, str, int], None, None]:
     filehandler = None
 
-    if fasta_file is None:
+    if input_file is None:
         print("READING FASTA FROM STDIN")
         filehandler = lambda: sys.stdin
 
     else:
-        print(f"READING FASTA FROM {fasta_file}")
-        filehandler = lambda: open(fasta_file, 'rt')
+        print(f"READING FASTA FROM {input_file}")
+        filehandler = lambda: open(input_file, 'rt')
 
-        if fasta_file.endswith(".gz"):
+        if input_file.endswith(".gz"):
             if USE_PYTHON:
-                print(f"READING FASTA FROM PYGZ {fasta_file}")
-                filehandler = lambda: gzip.open(fasta_file, 'rt')
+                print(f"READING FASTA FROM PYGZ {input_file}")
+                filehandler = lambda: gzip.open(input_file, 'rt')
 
             else:
-                print(f"READING FASTA FROM PIPE {fasta_file}")
-                filehandler = lambda: os.popen(f"gunzip -k -c {fasta_file}", mode="r")
+                print(f"READING FASTA FROM PIPE {input_file}")
+                filehandler = lambda: os.popen(f"gunzip -k -c {input_file}", mode="r")
 
-                # p1     = subprocess.Popen(f"gunzip -k -c {fasta_file}", stdout=subprocess.PIPE, shell=True)
+                # p1     = subprocess.Popen(f"gunzip -k -c {input_file}", stdout=subprocess.PIPE, shell=True)
                 # for row in parse_fasta(p1.stdout):
                 #     yield row
                 # print("loop done")
@@ -654,27 +729,27 @@ def read_fasta(fasta_file: Union[str, None]) -> Generator[Tuple[str, str, int], 
             for row in parse_fasta(fhd):
                 yield row
 
-def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, int], None, None]:
+def gen_kmers(input_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, int, int], None, None]:
     pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
 
-    for num, (name, seq, seq_len) in enumerate(read_fasta(fasta_file)):
+    for chrom_num, (name, seq, seq_len) in enumerate(read_fasta(input_file)):
         # mm = None
-        # print(f"{num+1:11,d} {name}")
-        print(f"{num+1:03d} {name} {seq_len:15,d}")
+        # print(f"{chrom_num+1:11,d} {name}")
+        print(f"{chrom_num+1:03d} {name} {seq_len:15,d}")
 
         ints:List[Union[int,None]] = []
         fwd:int = 0
         rev:int = 0
-        for i in range(0, seq_len - kmer_len + 1):
-            ints:List[Union[int,None]] = seq[i:i+kmer_len]
+        for chrom_kmer_num in range(0, seq_len - kmer_len + 1):
+            ints:List[Union[int,None]] = seq[chrom_kmer_num:chrom_kmer_num+kmer_len]
 
             if None in ints: continue
 
             fwd:int = 0
             rev:int = 0
-            for p, i in enumerate(ints):
-                fwd += pos_val[         p  ]*   i
-                rev += pos_val[kmer_len-p-1]*(3-i)
+            for p, j in enumerate(ints):
+                fwd += pos_val[         p  ]*   j
+                rev += pos_val[kmer_len-p-1]*(3-j)
 
             # print(f"{num+1:03d} {name} {i} {kmer} {ints} {ints_p} {fwd:03d} {stni} {stni_p} {rev:03d}")
             # print(f"{num+1:03d} {name} {fwd:03d} {rev:03d} {ints}")
@@ -684,13 +759,11 @@ def gen_kmers(fasta_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, 
             # print(" ints_p ", ints_p, fwd)
             # print(" stni_p ", stni_p, rev)
 
-            yield num, name, seq_len, fwd, rev
+            yield chrom_num, name, seq_len, chrom_kmer_num, fwd, rev
 
 def process_kmers(
         kmers      : np.ndarray,
         header     : Header,
-        index_file : str,
-        buffer_size: int  = io.DEFAULT_BUFFER_SIZE,
         frag_size  : int  = 1_000_000_000,
         debug      : bool = False) -> np.ndarray:
 
@@ -784,13 +857,13 @@ def process_kmers(
                 print("        vals_frag.max     ", np.max(vals_frag))
                 print("        vals_frag.sum     ", np.sum(vals_frag))
 
-            with open(index_file, "r+b", buffering=buffer_size) as fhd:
-                npmm                    = header.as_array(fhd)
+            with header.open_index_tmp_file() as fhd:
+                npmm                    = header.get_array_from_fhd(fhd)
                 npmm_frag               = npmm[frag_from:frag_to]
                 hist_before             = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
                 npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
                 hist_after              = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
-                
+
                 # if hist is None: hist_before[0] = 2 * np.iinfo(np.uint8).max + 2
                 hist_diff               = hist_after - hist_before
 
@@ -827,8 +900,7 @@ def process_kmers(
 
 def create_fasta_index(
         project_name : str,
-        fasta_file   : str,
-        index_file   : str,
+        input_file   : str,
         kmer_len     : int,
         overwrite    : bool,
         FLUSH_EVERY  : int  =   100_000_000,
@@ -837,24 +909,14 @@ def create_fasta_index(
         buffer_size  : int  = io.DEFAULT_BUFFER_SIZE,
         debug        : bool = False) -> None:
 
-    header = Header(project_name, fasta_file, kmer_len)
+    header = Header(project_name, input_file=input_file, kmer_len=kmer_len, buffer_size=buffer_size)
 
     print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d} bytes {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
     # print(header)
 
-    if os.path.exists(index_file):
-        if overwrite:
-            os.remove(index_file)
-        else:
-            raise ValueError(f"file {index_file} already exists and overwritting disabled")
-
-    index_file_tmp = f"{index_file}.tmp"
-    if os.path.exists(index_file_tmp):
-        os.remove(index_file_tmp)
-
     print("default buffer size", buffer_size)
 
-    header.init_file(index_file_tmp)
+    header.init_index_tmp_file(overwrite=overwrite)
 
     # https://docs.python.org/3/library/mmap.html
 
@@ -869,11 +931,12 @@ def create_fasta_index(
     if frag_size < min_frag_size   : frag_size = min_frag_size
     if frag_size > header.data_size: frag_size = header.data_size
 
-    # for chrom_num, name, pos, count, mm in gen_kmers(fasta_file, kmer_len, opener):
+    # for chrom_num, name, pos, count, mm in gen_kmers(input_file, kmer_len, opener):
     chromosomes = []
-    for chrom_num, name, seq_len, fwd, rev in gen_kmers(fasta_file, kmer_len):
+    for chrom_num, name, seq_len, chrom_kmer_num, fwd, rev in gen_kmers(input_file, kmer_len):
         pos               = fwd if fwd < rev else rev
         num_kmers        += 1
+        # if chrom_kmer_num >= 1_000_000: continue
 
         if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
             last_list_pos = list_pos
@@ -882,7 +945,7 @@ def create_fasta_index(
                 print(f"  {FLUSH_EVERY:15,d} {name} {last_list_pos:15,d}")
 
             if list_pos > 0:
-                hist_k = process_kmers(kmers[:list_pos], header, index_file_tmp, buffer_size=buffer_size, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
+                hist_k = process_kmers(kmers[:list_pos], header, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
                 if hist is None: hist  = hist_k
                 else:            hist += hist_k
@@ -894,7 +957,7 @@ def create_fasta_index(
                     print(f"  fwd          {fwd         :3d} rev      {rev     :3d} pos       {pos      :3d}")
 
                 list_pos = 0
-                # if chrom_num == 3: break
+                # if chrom_num == 2: break
 
             if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
                 print(f"  new chrom {name} {chrom_num:03d} {last_list_pos:15,d}")
@@ -906,7 +969,7 @@ def create_fasta_index(
         list_pos += 1
 
     if list_pos > 0:
-        hist_k = process_kmers(kmers[:list_pos], header, index_file_tmp, buffer_size=buffer_size, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
+        hist_k = process_kmers(kmers[:list_pos], header, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
         if hist is None: hist  = hist_k
         else:            hist += hist_k
@@ -927,11 +990,9 @@ def create_fasta_index(
 
     print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} num_kmers {header.num_kmers:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d}")
 
-    print("  indexing finished")
+    print("  indexing finished. creating header")
 
-    print("  creating header")
-    with header.open_file(index_file_tmp, mode="r+b", buffer_size=buffer_size) as fhd:
-        header.write(fhd)
+    header.write_metadata_index_tmp_file()
 
     hist_list = hist.tolist()
     assert header.hist == hist_list, f"hist_list\n{hist_list}\nheader.hist\n{header.hist}"
@@ -939,33 +1000,30 @@ def create_fasta_index(
     print("  DONE")
 
     print("renaming")
-    os.rename(index_file_tmp, index_file)
-
-    # print("compressing")
-    # with open(index_file_tmp, 'rb') as f_in:
-    #     with gzip.open(f'{index_file}.gz', compresslevel=9, mode='wb') as f_out:
-    #         shutil.copyfileobj(f_in, f_out)
-
-    # print("cleaning up")
-    # os.remove(index_file_tmp)
+    os.rename(header.index_tmp_file, header.index_file)
 
     print("done")
 
-def read_fasta_index(project_name: str, index_file: str, debug: bool = False) -> None:
-    header   = Header(project_name, None, None)
+def read_fasta_index(
+        project_name: str,
+        input_file  : Union[str, None] = None,
+        kmer_len    : Union[int, None] = None,
+        index_file  : Union[str, None] = None,
+        debug       : bool = False) -> None:
 
-    with open(index_file, "r+b") as fhd:
-        header.read(fhd)
-        print(header)
+    header   = Header(project_name, input_file=input_file, kmer_len=kmer_len, index_file=index_file)
 
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} bytes     {header.max_size//1024:15,d} Kb        {header.max_size//1024//1024:15,d} Mb       {header.max_size//1024//1024//1024:15,d} Gb")
-        print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} num_kmers {header.num_kmers     :15,d} kmer_size {header.kmer_size           :15,d} max_size {header.max_size                  :15,d}")
+    header.read_metadata()
+    print(header)
 
-        header.check(fhd)
-        print("OK")
+    print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} bytes     {header.max_size//1024:15,d} Kb        {header.max_size//1024//1024:15,d} Mb       {header.max_size//1024//1024//1024:15,d} Gb")
+    print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} num_kmers {header.num_kmers     :15,d} kmer_size {header.kmer_size           :15,d} max_size {header.max_size                  :15,d}")
 
+    header.check_data_index()
+    print("OK")
+
+    for npmm in header.get_array_from_index_file():
         # https://docs.python.org/3/library/mmap.html
-        npmm = header.as_array(fhd)
 
         if (header.kmer_len <= 5 and DEBUG) or debug:
             for byte_pos in range(npmm.shape[0]):
@@ -976,8 +1034,8 @@ def read_fasta_index(project_name: str, index_file: str, debug: bool = False) ->
         npmm._mmap.close()
         del npmm
 
-        # https://www.programiz.com/python-programming/methods/built-in/memoryview
-        # for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
+    # https://www.programiz.com/python-programming/methods/built-in/memoryview
+    # for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
 
 def run_test(overwrite: bool = False):
     project_name = "example"
@@ -994,13 +1052,13 @@ def run_test(overwrite: bool = False):
 
     for kmer_len in kmer_lens:
         print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
-        fasta_file = f"{project_name}-{kmer_len:02d}.fasta.gz"
-        # fasta_file = None # None for stdin
+        input_file = f"{project_name}-{kmer_len:02d}.fasta.gz"
+        # input_file = None # None for stdin
 
         index_file = f"{project_name}-{kmer_len:02d}.fasta.gz.{kmer_len:02d}.bin"
 
         print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
-        create_fasta_index(project_name, fasta_file, index_file, kmer_len, overwrite=overwrite)
+        create_fasta_index(project_name, input_file, index_file, kmer_len, overwrite=overwrite)
         # read_fasta_index(project_name, index_file)
 
         print()
@@ -1010,20 +1068,19 @@ def main() -> None:
         run_test(overwrite=False)
 
     else:
-        fasta_file =     sys.argv[1]
-        kmer_len   = int(sys.argv[2])
+        input_file =     sys.argv[1]
+        kmer_len        = int(sys.argv[2])
 
-        project_name = fasta_file
-        index_file   = f"{fasta_file}.{kmer_len:02d}.bin"
+        project_name    = input_file
 
         buffer_size = 2**16
         # buffer_size = io.DEFAULT_BUFFER_SIZE
 
-        print(f"project_name {project_name:s} fasta_file {fasta_file:s} index_file {index_file:s} kmer_len {kmer_len:15,d}")
+        print(f"project_name {project_name:s} input_file {input_file:s} kmer_len {kmer_len:15,d}")
 
-        create_fasta_index(project_name, fasta_file, index_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
+        create_fasta_index(project_name, input_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
 
-        read_fasta_index(project_name, index_file)
+        read_fasta_index(project_name, input_file=input_file, kmer_len=kmer_len)
 
     print()
 

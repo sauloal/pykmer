@@ -1,4 +1,5 @@
-*.bin
+*.kin
+*.kin.json
 *.gz
 *.fasta
 *.tmp

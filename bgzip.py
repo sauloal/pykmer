@@ -7,6 +7,8 @@ import struct
 
 # https://www.htslib.org/doc/bgzip.html
 
+# https://samtools.github.io/hts-specs/SAMv1.pdf
+
 """
 The file contents are:
     uint64_t number_entries
