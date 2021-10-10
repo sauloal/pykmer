@@ -25,69 +25,92 @@ import gc
 
 import numpy as np
 
-# TODO
-# - https://numpy.org/doc/stable/reference/generated/numpy.memmap.html
-# - block compress
-# - json header
-#
-# Profiling
-# time pypy -m cProfile -s cumulative ./indexer.py
-#
-# Compress
-# for BIN in *.bin; do if [[ ! -f "$BIN.gz" ]]; then gzip -v $BIN -c > $BIN.gz; fi; done
-#
-#
-# K=13; time (gunzip -c -k example-$K.fasta.gz | pypy ./indexer.py )
-#
-# time pypy ./indexer.py - K=13
-#
-#
-#
-# 4.0K example-03.fasta.gz  2.1K example-03.fasta.gz.03.08.bin
-#   8K example-05.fasta.gz  3.1K example-05.fasta.gz.05.08.bin
-#  80K example-07.fasta.gz   19K example-07.fasta.gz.07.08.bin
-# 1.3M example-09.fasta.gz  259K example-09.fasta.gz.09.08.bin
-#  19M example-11.fasta.gz  4.1M example-11.fasta.gz.11.08.bin
-# 291M example-13.fasta.gz   65M example-13.fasta.gz.13.08.bin
-# 4.7G example-15.fasta.gz  1.1G example-15.fasta.gz.15.08.bin
-#  74G example-17.fasta.gz   17G example-17.fasta.gz.17.08.bin
-#
-# 225M S_lycopersicum_chromosomes.4.00.fa.gz
-#
-#
-#
-# pypy K=15
-# pygzip  C=8 PIPE    C=8 pygz    C=8 STDIN   C=8 Popen
-# real    56m11.378s  33m48.443s  35m50.502s  66m 5.744s
-# user    41m56.097s  33m36.810s  39m46.295s  44m20.704s
-# sys     06m45.105s  00m07.941s  06m21.575s   7m47.551s
-#
-#
-#
-# Example
-#       real        user        sys        speed
-# K=11   0m 6.213s   0m 6.172s   0m0.040s   8,554,287 bp/s
-# K=13   2m19.482s   2m16.338s   0m1.341s  11,796,623 bp/s
-# K=15  27m21.105s  26m23.109s  0m14.690s  11,800,204 bp/s
-# K=17
-# K=19
-#
-#
-#time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15 8
-#      real         speed
-#K= 3   1,303,590 bp/s
-#K= 7
-#K= 9
-#K=11
-#K=13
-#K=15
-#K=17
-#K=19
-#K=21  2,263,620 bp/s
+
+"""
+    TODO
+    - https://numpy.org/doc/stable/reference/generated/numpy.memmap.html
+    - block compress
+    - json header
+
+    Profiling
+    time pypy -m cProfile -s cumulative ./indexer.py
+
+    Compress
+    for BIN in *.bin; do if [[ ! -f "$BIN.gz" ]]; then gzip -v $BIN -c > $BIN.gz; fi; done
+
+
+    K=13; time (gunzip -c -k example-$K.fasta.gz | pypy ./indexer.py )
+
+    time pypy ./indexer.py - K=13
+
+
+    4.0K example-03.fasta.gz  2.1K example-03.fasta.gz.03.08.bin
+      8K example-05.fasta.gz  3.1K example-05.fasta.gz.05.08.bin
+     80K example-07.fasta.gz   19K example-07.fasta.gz.07.08.bin
+    1.3M example-09.fasta.gz  259K example-09.fasta.gz.09.08.bin
+     19M example-11.fasta.gz  4.1M example-11.fasta.gz.11.08.bin
+    291M example-13.fasta.gz   65M example-13.fasta.gz.13.08.bin
+    4.7G example-15.fasta.gz  1.1G example-15.fasta.gz.15.08.bin
+     74G example-17.fasta.gz   17G example-17.fasta.gz.17.08.bin
+
+    225M S_lycopersicum_chromosomes.4.00.fa.gz
+
+
+
+    pypy K=15
+    pygzip  C=8 PIPE    C=8 pygz    C=8 STDIN   C=8 Popen
+    real    56m11.378s  33m48.443s  35m50.502s  66m 5.744s
+    user    41m56.097s  33m36.810s  39m46.295s  44m20.704s
+    sys     06m45.105s  00m07.941s  06m21.575s   7m47.551s
+
+
+
+    Example
+        real        user        sys        speed
+    K=11   0m 6.213s   0m 6.172s   0m0.040s   8,554,287 bp/s
+    K=13   2m19.482s   2m16.338s   0m1.341s  11,796,623 bp/s
+    K=15  27m21.105s  26m23.109s  0m14.690s  11,800,204 bp/s
+    K=17
+    K=19
+
+
+    K=15; F=S_lycopersicum_chromosomes.4.00.fa.gz.$K.bin; bgzip -i -I $F.gz.gzi -l 9 -c $F > $F.gz
+
+    time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz 15
+            real         speed         size  bgzip
+    K= 3                                 2K
+    K= 5                                 3K
+    K= 7
+    K= 9
+    K=11
+    K=13
+    K=15  29m3.686s    481,910 bp/s      1G  156M
+    K=17               202,825 bp/s     17G
+    X K=19                             257G
+    X K=21                               4T
+"""
+
+
+"""
+    IND         0     1            2            3     4            5     6     7     8
+    VALD              1            3                  15                             255
+    VALB              1            11                 1111                           11111111
+    MAX               0-1          0-3                0-128                          0-255
+    BIT_MASKS  = [None, 0b0000_0001, 0b0000_0011, None, 0b0000_1111, None, None, None, 0b1111_1111]
+
+    IND          0     1   2  3     4   5     6     7     8
+    VALB               1   11       1111                  11111111
+    MAX                0-1 0-3      0-128                 0-255
+    BIT_MASKS = [None, 1,  3, None, 15, None, None, None, 255]
+
+    HEADER_FMT = '<' + 'B'*2 + 'Q'*4 + 'Q'*(2**8)
+    HEADER_LEN = struct.calcsize(HEADER_FMT)
+"""
 
 
 DEBUG      = False
 USE_PYTHON = True
+
 
 ALFA       = 'ACGT'
 CONV       = [None] * 255
@@ -96,19 +119,6 @@ for pos, nuc in enumerate(ALFA):
     CONV[ord(nuc.upper())] = pos
     CONV[ord(nuc.lower())] = pos
 
-# IND         0     1            2            3     4            5     6     7     8
-# VALD              1            3                  15                             255
-# VALB              1            11                 1111                           11111111
-# MAX               0-1          0-3                0-128                          0-255
-# BIT_MASKS  = [None, 0b0000_0001, 0b0000_0011, None, 0b0000_1111, None, None, None, 0b1111_1111]
-
-# IND          0     1   2  3     4   5     6     7     8
-# VALB               1   11       1111                  11111111
-# MAX                0-1 0-3      0-128                 0-255
-# BIT_MASKS = [None, 1,  3, None, 15, None, None, None, 255]
-
-# HEADER_FMT = '<' + 'B'*2 + 'Q'*4 + 'Q'*(2**8)
-# HEADER_LEN = struct.calcsize(HEADER_FMT)
 
 Datetime    = NewType('Datetime'   , datetime.datetime)
 Hist        = NewType('Hist'       , List[int])
@@ -156,6 +166,7 @@ class Timer:
             f"delta time {self.time_delta_s} val {self.val_delta:12,d} speed {self.speed_delta:12,d}"
         )
         return rep
+
 
 class Header:
     HEADER_VER      : bytes     = b'KMER001'
@@ -372,7 +383,6 @@ class Header:
             else:
                 res.append(f"{k:20s}: {str(v)[:50]}")
         return "\n".join(res) + "\n"
-
 
 
 def gen_checksum(filename: str, chunk_size: int = 65536) -> str:
@@ -866,13 +876,11 @@ def create_fasta_index(
         num_kmers        += 1
 
         if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
-            if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
-                print(f"  new chrom {name} {chrom_num:03d} {list_pos:15,d}")
-                chromosomes.append((name, seq_len)) #todo: ignore if fastq file
-            else:
-                print(f"  {FLUSH_EVERY:15,d} {name} {list_pos:15,d}")
+            last_list_pos = list_pos
 
-            last_chrom_num = chrom_num
+            if last_chrom_num == chrom_num: #todo: do every N million bp instead of whole chromosomes
+                print(f"  {FLUSH_EVERY:15,d} {name} {last_list_pos:15,d}")
+
             if list_pos > 0:
                 hist_k = process_kmers(kmers[:list_pos], header, index_file_tmp, buffer_size=buffer_size, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
@@ -887,6 +895,12 @@ def create_fasta_index(
 
                 list_pos = 0
                 # if chrom_num == 3: break
+
+            if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
+                print(f"  new chrom {name} {chrom_num:03d} {last_list_pos:15,d}")
+                chromosomes.append((name, seq_len)) #todo: ignore if fastq file
+
+            last_chrom_num = chrom_num
 
         kmers[list_pos] = pos
         list_pos += 1
