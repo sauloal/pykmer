@@ -5,7 +5,7 @@ import sys
 import io
 import gzip
 
-from typing import Generator, Tuple, Union, List, TextIO
+from typing import Iterator, Tuple, Union, List, TextIO
 
 import gc
 
@@ -219,7 +219,7 @@ def test_np_example() -> None:
         # counts
         # # array([1, 1])
 
-def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Generator[Tuple[str, str, int], None, None]:
+def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Iterator[Tuple[str, str, int]]:
     seq_name : str       = None
     seq      : List[str] = []
     seq_num  : int       = 0
@@ -274,7 +274,7 @@ def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Generator[Tuple[s
     print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
     print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
 
-def read_fasta(input_file: Union[str, None]) -> Generator[Tuple[str, str, int], None, None]:
+def read_fasta(input_file: Union[str, None]) -> Iterator[Tuple[str, str, int]]:
     filehandler = None
 
     if input_file is None:
@@ -303,7 +303,7 @@ def read_fasta(input_file: Union[str, None]) -> Generator[Tuple[str, str, int], 
             for row in parse_fasta(fhd):
                 yield row
 
-def gen_kmers(input_file: str, kmer_len: int) -> Generator[Tuple[int, str, int, int, int], None, None]:
+def gen_kmers(input_file: str, kmer_len: int) -> Iterator[Tuple[int, str, int, int, int]]:
     pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
 
     for chrom_num, (name, seq, seq_len) in enumerate(read_fasta(input_file)):
@@ -431,14 +431,14 @@ def process_kmers(
                 print("        vals_frag.max     ", np.max(vals_frag))
                 print("        vals_frag.sum     ", np.sum(vals_frag))
 
-            with header.open_index_tmp_file() as fhd:
-                npmm                    = header.get_array_from_fhd(fhd)
+            for fhd in header.open_index_tmp_file():
+                npmm                    = header.get_array_from_fhd(fhd).next()
                 npmm_frag               = npmm[frag_from:frag_to]
-                hist_before             = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
+                hist_before             = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
                 npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
-                hist_after              = np.histogram(npmm_frag, bins=np.iinfo(np.uint8).max, range=(1,np.iinfo(np.uint8).max))[0]
+                hist_after              = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
 
-                # if hist is None: hist_before[0] = 2 * np.iinfo(np.uint8).max + 2
+                # if hist is None: hist_before[0] = 2 * header.max_val + 2
                 hist_diff               = hist_after - hist_before
 
                 if debug:

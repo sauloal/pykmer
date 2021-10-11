@@ -23,7 +23,7 @@ def print_index(index_file:str) -> None:
         tgtfile        = index_file[:-4]
         filesize       = os.path.getsize(tgtfile)
         number_entries = struct.unpack_from("Q", fhd.read(struct.calcsize('Q')))[0]
-        
+
         print(f"number_entries: {number_entries:15,d}")
         print(f"filesize      : {filesize:15,d}")
 

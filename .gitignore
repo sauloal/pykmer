@@ -1,9 +1,12 @@
 *.kin
 *.kin.json
 *.gz
+*.bgz
 *.fasta
 *.tmp
 *.swp
 *.gzi
 *.7z
 *.xz
+__pycache__/
+*.swp

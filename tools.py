@@ -5,15 +5,16 @@ import datetime
 import socket
 import hashlib
 
-from typing import Callable, Generator, Tuple, Union, List, Dict, NewType, BinaryIO, TextIO
+from collections import OrderedDict
+from typing import Tuple, Union, List, NewType, BinaryIO, Dict, Any, Iterator
 
 import numpy as np
-
+import bgzip
 
 Datetime    = NewType('Datetime'   , datetime.datetime)
 Hist        = NewType('Hist'       , List[int])
 Chromosomes = NewType('Chromosomes', List[Tuple[str, int]])
-
+Metadata    = NewType('Chromosomes', Dict[str, Any])
 
 class Timer:
     def __init__(self):
@@ -52,8 +53,8 @@ class Timer:
 
     def __str__(self):
         rep = (
-            f"ela   time {self.time_ela_s  } val {self.val_last :12,d} speed {self.speed_ela  :12,d}\n"
-            f"delta time {self.time_delta_s} val {self.val_delta:12,d} speed {self.speed_delta:12,d}"
+            f"ela   time {self.time_ela_s  } val {self.val_last :15,d} speed {self.speed_ela  :15,d}\n"
+            f"delta time {self.time_delta_s} val {self.val_delta:15,d} speed {self.speed_delta:15,d}"
         )
         return rep
 
@@ -77,8 +78,9 @@ class Header:
         "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
         "vals_sum"           , "vals_count"       , "vals_min"         , "vals_max"
     ]
-    EXT = 'kin'
-    TMP = 'tmp'
+    IND_EXT  = 'kin'
+    DESC_EXT = 'json'
+    TMP      = 'tmp'
 
     def __init__(self,
             project_name   : str,
@@ -87,25 +89,18 @@ class Header:
             index_file     : Union[str, None] = None,
             buffer_size    : int = io.DEFAULT_BUFFER_SIZE):
 
-        self.project_name   :str         = project_name
-        self.input_file_name:str         = input_file
-        self.kmer_len       :int         = kmer_len
-        self._buffer_size   :int         = buffer_size
-
-        if index_file is not None:
-            self._parse_index_file_name(index_file)
-
-        assert self.kmer_len
-        assert self.kmer_len > 0
-        assert self.kmer_len % 2 == 1
+        self.project_name          :str         = project_name
+        self.input_file_name       :str         = os.path.basename(input_file) if input_file else input_file
+        self.kmer_len              :int         = kmer_len
+        self._buffer_size          :int         = buffer_size
 
         self.input_file_size       :int         = None
         self.input_file_ctime      :float       = None
         self.input_file_cheksum    :str         = None
 
-        self.ouput_file_size       :int         = None
-        self.ouput_file_ctime      :float       = None
-        self.ouput_file_cheksum    :str         = None
+        self.output_file_size      :int         = None
+        self.output_file_ctime     :float       = None
+        self.output_file_cheksum   :str         = None
 
         self.num_kmers             :int         = None
         self.chromosomes           :Chromosomes = None
@@ -129,14 +124,30 @@ class Header:
         self.vals_min              :int         = None
         self.vals_max              :int         = None
 
-    @property
-    def index_file(self) -> str: return f"{self.input_file_name}.{self.kmer_len:02d}.{self.EXT}"
+        if index_file is not None:
+            self._parse_index_file_name(index_file)
+            self.read_metadata()
+
+        assert self.kmer_len
+        assert self.kmer_len > 0
+        assert self.kmer_len % 2 == 1
 
     @property
-    def index_tmp_file(self) -> str: return f"{self.index_file}.{self.TMP}"
+    def index_file(self) -> str:
+        if os.path.exists(f"{self.index_file_root}.bgz"):
+            return f"{self.index_file_root}.bgz"
+        else:
+            return self.index_file_root
 
     @property
-    def metadata_file(self) -> str: return f"{self.index_file}.json"
+    def index_file_root(self) -> str:
+        return f"{self.input_file_name}.{self.kmer_len:02d}.{self.IND_EXT}"
+
+    @property
+    def index_tmp_file(self) -> str: return f"{self.index_file_root}.{self.TMP}"
+
+    @property
+    def metadata_file(self) -> str: return f"{self.index_file_root}.{self.DESC_EXT}"
 
     @property
     def kmer_size(self) -> int: return 4 ** self.kmer_len
@@ -153,26 +164,31 @@ class Header:
     @property
     def max_val(self) -> int: return np.iinfo(np.uint8).max
 
-    # @property
-    # def header_len(self) -> int: return self.HEADER_LEN
 
     def _parse_index_file_name(self, index_file):
-        ext = index_file[(2 + 1) + (len(self.EXT) + 1) * -1:]
+        index_file = index_file[:-4] if index_file.endswith('.bgz') else index_file
+        ext_len    = ((2 + 1) + (len(self.IND_EXT) + 1))
+        ext        = index_file[ext_len * -1:]
+        # print(f"index_file {index_file}")
+        # print(f"ext        {ext}")
 
         if self.input_file_name is None:
-            self.input_file_name = ext[len(self.EXT) * -1:]
+            self.input_file_name = index_file[:ext_len * -1]
+            # print(f"input_file_name {self.input_file_name}")
         
         if self.kmer_len is None:
             self.kmer_len        = int(ext[1:3])
+            # print(f"kmer_len {self.kmer_len}")
 
-    def _get_mmap(self, fhd: BinaryIO, offset: int = 0, mode: str ="r+") -> np.memmap:
-        return np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,))
+    def _get_mmap(self, fhd: BinaryIO, offset: int = 0, mode: str ="r+") -> Iterator[np.memmap]:
+        with np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,)) as nmmp:
+            yield nmmp
 
 
     def update_stats(self, fhd: BinaryIO) -> None:
         print("updating stats")
 
-        arr             = self.get_array_from_fhd(fhd)
+        arr             = self.get_array_from_fhd(fhd).next()
         hist_v, _       = np.histogram(arr, bins=self.max_val, range=(1,self.max_val))
 
         self.hist       = hist_v.tolist()
@@ -189,11 +205,11 @@ class Header:
         self.vals_max   = np.max(arr).item()
 
     def update_stats_index_file(self) -> None:
-        with self.open_index_file() as fhd:
+        for fhd in self.open_index_file():
             self.update_stats(fhd)
 
     def update_stats_index_tmp_file(self) -> None:
-        with self.open_index_tmp_file() as fhd:
+        for fhd in self.open_index_tmp_file():
             self.update_stats(fhd)
 
 
@@ -217,13 +233,19 @@ class Header:
         self.creation_duration   = str(time_end - self._creation_time_start_t)
 
 
-    def open_file(self, index_file: str, mode: str = "r+b") -> BinaryIO:
-        return open(index_file, mode, buffering=self._buffer_size)
+    def open_file(self, index_file: str, mode: str = "r+b") -> Iterator[BinaryIO]:
+        if index_file.endswith('.bgz'):
+            with open(index_file, mode, buffering=self._buffer_size) as raw:
+                with bgzip.BGZipReader(raw) as fhd:
+                    yield fhd
+        else:
+            with open(index_file, mode, buffering=self._buffer_size) as fhd:
+                yield fhd
 
-    def open_index_file(self, mode: str = "r+b") -> BinaryIO:
+    def open_index_file(self, mode: str = "r+b") -> Iterator[BinaryIO]:
         return self.open_file(self.index_file, mode=mode)
 
-    def open_index_tmp_file(self, mode: str = "r+b") -> BinaryIO:
+    def open_index_tmp_file(self, mode: str = "r+b") -> Iterator[BinaryIO]:
         return self.open_file(self.index_tmp_file, mode=mode)
 
 
@@ -233,6 +255,12 @@ class Header:
                 os.remove(self.index_file)
             else:
                 raise ValueError(f"file {self.index_file} already exists and overwritting disabled")
+
+        if os.path.exists(self.index_file_root):
+            if overwrite:
+                os.remove(self.index_file_root)
+            else:
+                raise ValueError(f"file {self.index_file_root} already exists and overwritting disabled")
 
         if os.path.exists(self.metadata_file):
             os.remove(self.metadata_file)
@@ -260,17 +288,17 @@ class Header:
         return self.init_file(self.index_tmp_file, mode=mode)
 
 
-    def get_array_from_fhd(self, fhd: BinaryIO, mode: str = "r+") -> np.memmap:
-        npmm = self._get_mmap(fhd, offset=0, mode=mode)
-        return npmm
+    def get_array_from_fhd(self, fhd: BinaryIO, mode: str = "r+") -> Iterator[np.memmap]:
+        for npmm in self._get_mmap(fhd, offset=0, mode=mode):
+            yield npmm
 
-    def get_array_from_index_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> np.memmap:
-        with self.open_index_file(mode=fhd_mode) as fhd:
-            yield self.get_array_from_fhd(fhd, mode=mm_mode)
+    def get_array_from_index_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> Iterator[np.memmap]:
+        for fhd in self.open_index_file(mode=fhd_mode):
+            return self.get_array_from_fhd(fhd, mode=mm_mode)
 
-    def get_array_from_index_tmp_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> np.memmap:
-        with self.open_index_tmp_file(mode=fhd_mode) as fhd:
-            yield self.get_array_from_fhd(fhd, mode=mm_mode)
+    def get_array_from_index_tmp_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> Iterator[np.memmap]:
+        for fhd in self.open_index_tmp_file(mode=fhd_mode):
+            return self.get_array_from_fhd(fhd, mode=mm_mode)
 
 
     def write_metadata_file(self, index_file: str) -> None:
@@ -308,7 +336,7 @@ class Header:
     def check_data(self, fhd: BinaryIO) -> None:
         self.read_metadata()
 
-        other = self.__class__(self.project_name, self.input_file_name, self.kmer_len)
+        other = self.__class__(self.project_name, input_file=self.input_file_name, kmer_len=self.kmer_len)
         other.read_metadata()
         assert self.project_name     == other.project_name
         assert self.input_file_name  == other.input_file_name
@@ -338,16 +366,49 @@ class Header:
     def check_data_index_tmp(self) -> None:
         self.check_data_file(self.index_tmp_file)
 
+    def __iter__(self) -> Iterator[int]:
+        for fhd in self.open_index_file():
+            c = fhd.read(1)
+            while c:
+                yield c[0]
+                c = fhd.read(1)
+
+    def calculate_distance(self, other: "Header", min_count: int=1):
+        s_count = 0
+        o_count = 0
+        c_count = 0
+        for pos, (s_char, o_char) in enumerate(zip(self, other)):
+            s_valid = s_char >= min_count
+            o_valid = o_char >= min_count
+            s_count += 1 if s_valid             else 0
+            o_count += 1 if o_valid             else 0
+            c_count += 1 if s_valid and o_valid else 0
+            # print(f"{pos:15,d} {s_char:3d} {o_char:3d} {s_count:15,d} {o_count:15,d} {c_count:15,d}")
+        return s_count, o_count, c_count
+
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = OrderedDict()
+        for k in ["file_ver", "kmer_len", "kmer_size", "data_size", "max_size"] + self.HEADER_DATA:
+            v = getattr(self, k)
+            data[k] = v
+        return data
+
+    def to_json(self, indent: int=1, sort_keys: bool=True) -> str:
+        return json.dumps(self.to_dict(), indent=indent, sort_keys=sort_keys)
+
 
     def __str__(self) -> str:
         res = []
-        for k in ["file_ver", "kmer_len", "kmer_size", "data_size", "max_size"] + self.HEADER_DATA:
-            v = getattr(self, k)
+        for k, v in self.to_dict().items():
             if isinstance(v, int):
                 res.append(f"{k:20s}: {v:15,d}")
             else:
                 res.append(f"{k:20s}: {str(v)[:50]}")
         return "\n".join(res) + "\n"
+
+    def __repr__(self) -> str:
+        return str(self)
 
 def gen_checksum(filename: str, chunk_size: int = 2**16) -> str:
     file_hash = hashlib.sha256()
