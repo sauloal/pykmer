@@ -69,8 +69,9 @@ class Header:
     HEADER_DATA     : List[str] = [
         "project_name"       ,
         "kmer_len"           ,
-        "input_file_name"    , "input_file_size"  , "input_file_ctime" , "input_file_cheksum" ,
-                               "output_file_size" , "output_file_ctime", "output_file_cheksum",
+        "input_file_name"    , "input_file_path"  ,
+        "input_file_size"    , "input_file_ctime" , "input_file_cheksum" ,
+        "output_file_size"   , "output_file_ctime", "output_file_cheksum",
         "num_kmers"          , "chromosomes"      ,
         "creation_time_start", "creation_time_end", "creation_duration",
         "hostname"           , "checksum_script"  ,
@@ -91,6 +92,7 @@ class Header:
 
         self.project_name          :str         = project_name
         self.input_file_name       :str         = os.path.basename(input_file) if input_file else input_file
+        self.input_file_path       :str         = os.path.abspath(input_file)  if input_file else input_file
         self.kmer_len              :int         = kmer_len
         self._buffer_size          :int         = buffer_size
 
@@ -141,7 +143,7 @@ class Header:
 
     @property
     def index_file_root(self) -> str:
-        return f"{self.input_file_name}.{self.kmer_len:02d}.{self.IND_EXT}"
+        return f"{self.input_file_path}.{self.kmer_len:02d}.{self.IND_EXT}"
 
     @property
     def index_tmp_file(self) -> str: return f"{self.index_file_root}.{self.TMP}"
@@ -216,9 +218,9 @@ class Header:
     def update_metadata(self, index_file) -> None:
         print("updating metadata")
 
-        self.input_file_size     = os.path.getsize(self.input_file_name)
-        self.input_file_ctime    = os.path.getctime(self.input_file_name)
-        self.input_file_cheksum  = gen_checksum(self.input_file_name)
+        self.input_file_size     = os.path.getsize(self.input_file_path)
+        self.input_file_ctime    = os.path.getctime(self.input_file_path)
+        self.input_file_cheksum  = gen_checksum(self.input_file_path)
 
         self.output_file_size    = os.path.getsize(index_file)
         self.output_file_ctime   = os.path.getctime(index_file)
@@ -336,10 +338,11 @@ class Header:
     def check_data(self, fhd: BinaryIO) -> None:
         self.read_metadata()
 
-        other = self.__class__(self.project_name, input_file=self.input_file_name, kmer_len=self.kmer_len)
+        other = self.__class__(self.project_name, input_file=self.input_file_path, kmer_len=self.kmer_len)
         other.read_metadata()
         assert self.project_name     == other.project_name
         assert self.input_file_name  == other.input_file_name
+        assert self.input_file_path  == other.input_file_path
         assert self.kmer_len         == other.kmer_len
         assert self.num_kmers        == other.num_kmers
 
