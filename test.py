@@ -29,7 +29,7 @@ def create_test(seq_name, kmer_len):
 def main():
     for kmer_len in [3, 5, 7, 9, 11, 13, 15, 17, 19, 21]:
         print(kmer_len)
-        seq_name = "example"
+        seq_name = "examples/example-"
         create_test(seq_name, kmer_len)
 
 if __name__ == "__main__":

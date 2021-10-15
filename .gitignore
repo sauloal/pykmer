@@ -10,3 +10,5 @@
 *.xz
 __pycache__/
 *.swp
+data/
+examples/
