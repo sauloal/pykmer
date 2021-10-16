@@ -183,28 +183,29 @@ class Header:
             # print(f"kmer_len {self.kmer_len}")
 
     def _get_mmap(self, fhd: BinaryIO, offset: int = 0, mode: str ="r+") -> Iterator[np.memmap]:
-        with np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,)) as nmmp:
-            yield nmmp
+        nmmp = np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,))
+        yield nmmp
+        del nmmp
 
 
     def update_stats(self, fhd: BinaryIO) -> None:
         print("updating stats")
 
-        arr             = self.get_array_from_fhd(fhd).next()
-        hist_v, _       = np.histogram(arr, bins=self.max_val, range=(1,self.max_val))
+        for arr in self.get_array_from_fhd(fhd):
+            hist_v, _       = np.histogram(arr, bins=self.max_val, range=(1,self.max_val))
 
-        self.hist       = hist_v.tolist()
-        # print(self.hist)
+            self.hist       = hist_v.tolist()
+            # print(self.hist)
 
-        self.hist_sum   = np.sum(hist_v).item()
-        self.hist_count = np.count_nonzero(hist_v)
-        self.hist_min   = np.min(hist_v).item()
-        self.hist_max   = np.max(hist_v).item()
+            self.hist_sum   = np.sum(hist_v).item()
+            self.hist_count = np.count_nonzero(hist_v)
+            self.hist_min   = np.min(hist_v).item()
+            self.hist_max   = np.max(hist_v).item()
 
-        self.vals_sum   = np.sum(arr).item()
-        self.vals_count = np.count_nonzero(arr)
-        self.vals_min   = np.min(arr).item()
-        self.vals_max   = np.max(arr).item()
+            self.vals_sum   = np.sum(arr).item()
+            self.vals_count = np.count_nonzero(arr)
+            self.vals_min   = np.min(arr).item()
+            self.vals_max   = np.max(arr).item()
 
     def update_stats_index_file(self) -> None:
         for fhd in self.open_index_file():
@@ -276,7 +277,7 @@ class Header:
             with open(index_file, 'w'):
                 pass
 
-        with self.open_file(index_file, mode=mode) as fhd:
+        for fhd in self.open_file(index_file, mode=mode):
             fhd.seek(self.max_size - 1)
             fhd.write(b'\0')
         # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
@@ -308,7 +309,7 @@ class Header:
         assert self.chromosomes
 
         self.update_metadata(index_file)
-        with self.open_file(index_file) as fhd:
+        for fhd in self.open_file(index_file):
             self.update_stats(fhd)
 
         header_data = {k: getattr(self,k) for k in self.HEADER_DATA}

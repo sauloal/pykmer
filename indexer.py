@@ -285,7 +285,7 @@ def read_fasta(input_file: Union[str, None]) -> Iterator[Tuple[str, str, int]]:
         print(f"READING FASTA FROM {input_file}")
         filehandler = lambda: open(input_file, 'rt')
 
-        if input_file.endswith(".gz"):
+        if input_file.endswith((".gz",".bgz")):
             if USE_PYTHON:
                 print(f"READING FASTA FROM PYGZ {input_file}")
                 filehandler = lambda: gzip.open(input_file, 'rt')
@@ -432,31 +432,31 @@ def process_kmers(
                 print("        vals_frag.sum     ", np.sum(vals_frag))
 
             for fhd in header.open_index_tmp_file():
-                npmm                    = header.get_array_from_fhd(fhd).next()
-                npmm_frag               = npmm[frag_from:frag_to]
-                hist_before             = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
-                npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
-                hist_after              = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
+                for npmm in header.get_array_from_fhd(fhd):
+                    npmm_frag               = npmm[frag_from:frag_to]
+                    hist_before             = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
+                    npmm[frag_from:frag_to] = npmm_frag + np.minimum(header.max_val - npmm_frag, vals_frag)
+                    hist_after              = np.histogram(npmm_frag, bins=header.max_val, range=(1,header.max_val))[0]
 
-                # if hist is None: hist_before[0] = 2 * header.max_val + 2
-                hist_diff               = hist_after - hist_before
+                    # if hist is None: hist_before[0] = 2 * header.max_val + 2
+                    hist_diff               = hist_after - hist_before
 
-                if debug:
-                    print("        hist_before       ", hist_before)
-                    print("        hist_after        ", hist_after)
-                    print("        hist_diff         ", hist_diff)
-                # print(npmm.tolist())
-                
-                if hist is None: hist   = hist_diff
-                else:            hist  += hist_diff
+                    if debug:
+                        print("        hist_before       ", hist_before)
+                        print("        hist_after        ", hist_after)
+                        print("        hist_diff         ", hist_diff)
+                    # print(npmm.tolist())
 
-                del hist_before
-                del hist_after
-                del hist_diff
-                del npmm_frag
-                del npmm
-                fhd.flush()
-                gc.collect()
+                    if hist is None: hist   = hist_diff
+                    else:            hist  += hist_diff
+
+                    del hist_before
+                    del hist_after
+                    del hist_diff
+                    del npmm_frag
+                    del npmm
+                    fhd.flush()
+                    gc.collect()
 
             # with open(index_file, "r+b", buffering=buffer_size) as fhd:
             #     npmm                    = header.as_array(fhd)
@@ -642,7 +642,7 @@ def main() -> None:
         run_test(overwrite=False)
 
     else:
-        input_file =     sys.argv[1]
+        input_file      =     sys.argv[1]
         kmer_len        = int(sys.argv[2])
 
         project_name    = input_file
@@ -654,7 +654,7 @@ def main() -> None:
 
         create_fasta_index(project_name, input_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
 
-        read_fasta_index(project_name, input_file=input_file, kmer_len=kmer_len)
+        # read_fasta_index(project_name, input_file=input_file, kmer_len=kmer_len)
 
     print()
 

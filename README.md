@@ -11,9 +11,9 @@
 ```bash
 K=15
 
-time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.gz $K
+time pypy ./indexer.py S_lycopersicum_chromosomes.4.00.fa.bgz $K
 
-F=S_lycopersicum_chromosomes.4.00.fa.gz.$K.kin
+F=S_lycopersicum_chromosomes.4.00.fa.bgz.$K.kin
 
 bgzip -i -I $F.bgz.gzi -l 9 -c $F > $F.bgz
 
