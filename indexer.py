@@ -43,183 +43,7 @@ for pos, nuc in enumerate(ALFA):
 
 
 
-
-def test_np(kmer_len: int, seq: str) -> None:
-    pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
-
-    seq = tuple(4 if s is None else s for s in seq)
-
-    w = np.array(pos_val, dtype='int64')
-    f = np.array(seq, dtype='int8')
-    f = np.nan_to_num(f, nan=4, copy=False)
-    # print(np.where(f == 4))
-    # f = f[438600:438800]
-    # print(f == 4)
-
-    print("w.shape", w.shape)
-    print("w.dtype", w.dtype)
-    print("f.shape", f.shape)
-    print("f.dtype", f.dtype)
-
-    for fc, (unique, counts) in enumerate(test_np_ord(w, f)):
-        print(" fc", fc+1)
-        print("  unique.shape", unique.shape)
-        print("  unique.dtype", unique.dtype)
-        print("  counts.shape", counts.shape)
-        print("  counts.dtype", counts.dtype)
-        yield unique, counts
-        # for k in ls:
-        #     print(" k", k)
-
-def test_np_ord(w, l) -> None:
-    ws = w.shape[0]
-    # print("w", w)
-
-    kmins = []
-
-    for y in range(ws):
-        m = l[y:]
-        ms = m.shape[0]
-        # print("m.shape", ms)
-
-        lt = m[:ms//ws*ws]
-        lts = lt.shape[0]
-        # print("lt.shape", lts)
-
-        lm = lt.reshape(lts//ws, ws)
-        # print("lm.shape", lm.shape)
-
-        lq = np.any(lm == 4, axis=1)
-
-        lr = lm[~lq]
-        lrs = lr.shape
-        # print("lr", lr)
-        # print("lr.shape", lrs)
-
-        rc_lr = lr[:,::-1]
-        rc    = 3 - rc_lr
-        # print("rc_lr", rc_lr)
-        # print("rc   ", rc)
-
-        lv = lr * w
-        # print("lv      ", lv)
-        # print("lv.shape", lv.shape)
-
-        rc_lv = rc * w
-        # print("rc_lv      ", rc_lv)
-        # print("rc_lv.shape", rc_lv.shape)
-
-        ls = lv.sum(axis=1)
-        # print("ls      ", ls)
-        # print("ls.shape", ls.shape)
-        # print("ls.dtype", ls.dtype)
-
-        rc_ls = rc_lv.sum(axis=1)
-        # print("rc_ls      ", rc_ls)
-        # print("rc_ls.shape", rc_ls.shape)
-        # print("rc_ls.dtype", rc_ls.dtype)
-
-        # ls.sort()
-        # rc_ls.sort()
-
-        kmin = np.minimum(ls, rc_ls)
-        # print("kmin      ", kmin)
-        # print("kmin.shape", kmin.shape)
-        # print("kmin.dtype", kmin.dtype)
-
-        kmins.append(kmin)
-        del kmin
-        del ls
-        del rc_ls
-        del lv
-        del rc_lv
-        del lr
-        del rc_lr
-        del lm
-        del lq
-        del lt
-        del m
-
-        # unique, counts = np.unique(kmin, return_counts=True)
-        # yield unique, counts
-
-    kmins_c = np.concatenate(kmins)
-    del kmins
-    kmins_c.sort()
-
-    print("summarizing")
-    unique, counts = np.unique(kmins_c, return_counts=True)
-    print("unique      ", unique)
-    print("unique.shape", unique.shape)
-    print("unique.dtype", unique.dtype)
-    print("counts.shape", counts.shape)
-    print("counts.dtype", counts.dtype)
-    yield unique, counts
-    del unique
-    del counts
-    del kmins_c
-
-def test_np_example() -> None:
-    w = np.array([4, 5])
-    w
-    # array([4, 5])
-
-    l = np.array([3, 3, 2, 2, 0, 4, 5])
-    l
-    # array([2, 2, 3, 3, 0, 4, 5])
-
-    for y in range(w.shape[0]):
-        print(y)
-
-        m = l[y:]
-        m
-        # 0
-        # array([2, 2, 3, 3, 0, 4, 5])
-        # 1
-        # array([2, 3, 3, 0, 4, 5])
-
-        lt = m[:m.shape[0]//2*2]
-        lt
-        # array([2, 2, 3, 3, 0, 4])
-
-        lm = lt.reshape(lt.shape[0]//2, 2)
-        lm
-        # array([
-        #     [2, 2],
-        #     [3, 3],
-        #     [0, 4]])
-
-        lq = np.any(lm == 0, axis=1)
-        lq
-        # array([False, False,  True])
-
-        lr = lm[~lq]
-        lr
-        # array([
-        #     [2, 2],
-        #     [3, 3]])
-
-        lv = lr * w
-        lv
-        # array([
-        #     [12, 15],
-        #     [ 8, 10]])
-
-        ls = lv.sum(axis=1)
-        ls
-        # array([27, 18])
-
-        ls.sort()
-        ls
-        # array([18, 27])
-
-        # unique, counts = np.unique(ls, return_counts=True)
-        # unique
-        # # array([18, 27])
-        # counts
-        # # array([1, 1])
-
-def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Iterator[Tuple[str, str, int]]:
+def parse_fasta(fhd: TextIO, timer: Timer, print_every: int=25_000_000) -> Iterator[Tuple[str, str, int]]:
     seq_name : str       = None
     seq      : List[str] = []
     seq_num  : int       = 0
@@ -227,7 +51,6 @@ def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Iterator[Tuple[st
     bp_num   : int       = 0
     bp_last_e: int       = 0
 
-    timer    :Timer      = Timer()
     conv     :List[Tuple[int,None]] = CONV
 
     for line in fhd:
@@ -274,7 +97,7 @@ def parse_fasta(fhd: TextIO, print_every: int = 25_000_000) -> Iterator[Tuple[st
     print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
     print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
 
-def read_fasta(input_file: Union[str, None]) -> Iterator[Tuple[str, str, int]]:
+def read_fasta(input_file: Union[str, None], timer: Timer) -> Iterator[Tuple[str, str, int]]:
     filehandler = None
 
     if input_file is None:
@@ -300,13 +123,13 @@ def read_fasta(input_file: Union[str, None]) -> Iterator[Tuple[str, str, int]]:
                 # print("loop done")
 
         with filehandler() as fhd:
-            for row in parse_fasta(fhd):
+            for row in parse_fasta(fhd, timer):
                 yield row
 
-def gen_kmers(input_file: str, kmer_len: int) -> Iterator[Tuple[int, str, int, int, int]]:
+def gen_kmers(input_file: str, kmer_len: int, timer: Timer) -> Iterator[Tuple[int, str, int, int, int]]:
     pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
 
-    for chrom_num, (name, seq, seq_len) in enumerate(read_fasta(input_file)):
+    for chrom_num, (name, seq, seq_len) in enumerate(read_fasta(input_file, timer)):
         # mm = None
         # print(f"{chrom_num+1:11,d} {name}")
         print(f"{chrom_num+1:03d} {name} {seq_len:15,d}")
@@ -477,7 +300,7 @@ def create_fasta_index(
         input_file   : str,
         kmer_len     : int,
         overwrite    : bool,
-        FLUSH_EVERY  : int  =   100_000_000,
+        FLUSH_EVERY  : int  =   500_000_000,
         min_frag_size: int  =   500_000_000,
         max_frag_size: int  = 1_000_000_000,
         buffer_size  : int  = io.DEFAULT_BUFFER_SIZE,
@@ -507,7 +330,7 @@ def create_fasta_index(
 
     # for chrom_num, name, pos, count, mm in gen_kmers(input_file, kmer_len, opener):
     chromosomes = []
-    for chrom_num, name, seq_len, chrom_kmer_num, fwd, rev in gen_kmers(input_file, kmer_len):
+    for chrom_num, name, seq_len, chrom_kmer_num, fwd, rev in gen_kmers(input_file, kmer_len, header.timer):
         pos               = fwd if fwd < rev else rev
         num_kmers        += 1
         # if chrom_kmer_num >= 1_000_000: continue
@@ -516,7 +339,12 @@ def create_fasta_index(
             last_list_pos = list_pos
 
             if last_chrom_num == chrom_num: #todo: do every N million bp instead of whole chromosomes
-                print(f"  {FLUSH_EVERY:15,d} {name} {last_list_pos:15,d}")
+                if list_pos < (FLUSH_EVERY // 2):
+                    print(f"  {name} list_pos {list_pos:15,d} FLUSH_EVERY {FLUSH_EVERY:15,d} frag_size {frag_size:15,d}. skipping flushing")
+                    last_chrom_num = chrom_num
+                    continue
+                else:
+                    print(f"  {FLUSH_EVERY:15,d} {name} {last_list_pos:15,d}")
 
             if list_pos > 0:
                 hist_k = process_kmers(kmers[:list_pos], header, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
@@ -583,7 +411,7 @@ def read_fasta_index(
         input_file  : Union[str, None] = None,
         kmer_len    : Union[int, None] = None,
         index_file  : Union[str, None] = None,
-        debug       : bool = False) -> None:
+        debug       : bool             = False) -> None:
 
     header   = Header(project_name, input_file=input_file, kmer_len=kmer_len, index_file=index_file)
 
@@ -611,7 +439,7 @@ def read_fasta_index(
     # https://www.programiz.com/python-programming/methods/built-in/memoryview
     # for byte_pos, byte_val in enumerate(memoryview(mm[header.HEADER_LEN:header.HEADER_LEN+header.data_size])):
 
-def run_test(overwrite: bool = False):
+def run_test(overwrite: bool=False):
     project_name = "example"
     # kmer_lens =  [3, 5, 7, 9, 11, 13, 15, 17]
     # kmer_lens =  [3]

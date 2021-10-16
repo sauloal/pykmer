@@ -73,7 +73,7 @@ class Header:
         "input_file_size"    , "input_file_ctime" , "input_file_cheksum" ,
         "output_file_size"   , "output_file_ctime", "output_file_cheksum",
         "num_kmers"          , "chromosomes"      ,
-        "creation_time_start", "creation_time_end", "creation_duration",
+        "creation_time_start", "creation_time_end", "creation_duration"  , "creation_speed",
         "hostname"           , "checksum_script"  ,
         "hist"               ,
         "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
@@ -92,7 +92,7 @@ class Header:
 
         self.project_name          :str         = project_name
         self.input_file_name       :str         = os.path.basename(input_file) if input_file else input_file
-        self.input_file_path       :str         = os.path.abspath(input_file)  if input_file else input_file
+        self.input_file_path       :str         = os.path.abspath( input_file) if input_file else input_file
         self.kmer_len              :int         = kmer_len
         self._buffer_size          :int         = buffer_size
 
@@ -107,10 +107,11 @@ class Header:
         self.num_kmers             :int         = None
         self.chromosomes           :Chromosomes = None
 
-        self._creation_time_start_t:Datetime    = datetime.datetime.now()
+        self.timer                 :Timer       = Timer()
         self.creation_time_start   :str         = None
         self.creation_time_end     :str         = None
         self.creation_duration     :str         = None
+        self.creation_speed        :int         = None
 
         self.hostname              :str         = None
         self.checksum_script       :str         = None
@@ -167,7 +168,7 @@ class Header:
     def max_val(self) -> int: return np.iinfo(np.uint8).max
 
 
-    def _parse_index_file_name(self, index_file):
+    def _parse_index_file_name(self, index_file: str) -> None:
         index_file = index_file[:-4] if index_file.endswith('.bgz') else index_file
         ext_len    = ((2 + 1) + (len(self.IND_EXT) + 1))
         ext        = index_file[ext_len * -1:]
@@ -182,7 +183,7 @@ class Header:
             self.kmer_len        = int(ext[1:3])
             # print(f"kmer_len {self.kmer_len}")
 
-    def _get_mmap(self, fhd: BinaryIO, offset: int = 0, mode: str ="r+") -> Iterator[np.memmap]:
+    def _get_mmap(self, fhd: BinaryIO, offset: int=0, mode: str="r+") -> Iterator[np.memmap]:
         nmmp = np.memmap(fhd, dtype=np.uint8, mode=mode, offset=offset, shape=(self.data_size,))
         yield nmmp
         del nmmp
@@ -215,8 +216,7 @@ class Header:
         for fhd in self.open_index_tmp_file():
             self.update_stats(fhd)
 
-
-    def update_metadata(self, index_file) -> None:
+    def update_metadata(self, index_file: str) -> None:
         print("updating metadata")
 
         self.input_file_size     = os.path.getsize(self.input_file_path)
@@ -231,12 +231,13 @@ class Header:
         self.checksum_script     = gen_checksum(os.path.basename(__file__))
 
         time_end                 = datetime.datetime.now()
-        self.creation_time_start = str(self._creation_time_start_t)
+        self.creation_time_start = str(self.timer.time_begin)
         self.creation_time_end   = str(time_end)
-        self.creation_duration   = str(time_end - self._creation_time_start_t)
+        self.creation_duration   = str(time_end - self.timer.time_begin)
+        self.creation_speed      = self.timer.speed_ela
 
 
-    def open_file(self, index_file: str, mode: str = "r+b") -> Iterator[BinaryIO]:
+    def open_file(self, index_file: str, mode: str="r+b") -> Iterator[BinaryIO]:
         if index_file.endswith('.bgz'):
             with open(index_file, mode, buffering=self._buffer_size) as raw:
                 with bgzip.BGZipReader(raw) as fhd:
@@ -245,10 +246,10 @@ class Header:
             with open(index_file, mode, buffering=self._buffer_size) as fhd:
                 yield fhd
 
-    def open_index_file(self, mode: str = "r+b") -> Iterator[BinaryIO]:
+    def open_index_file(self, mode: str="r+b") -> Iterator[BinaryIO]:
         return self.open_file(self.index_file, mode=mode)
 
-    def open_index_tmp_file(self, mode: str = "r+b") -> Iterator[BinaryIO]:
+    def open_index_tmp_file(self, mode: str="r+b") -> Iterator[BinaryIO]:
         return self.open_file(self.index_tmp_file, mode=mode)
 
 
@@ -271,7 +272,7 @@ class Header:
         if os.path.exists(self.index_tmp_file):
             os.remove(self.index_tmp_file)
 
-    def init_file(self, index_file: str, mode: str = "r+b") -> None:
+    def init_file(self, index_file: str, mode: str="r+b") -> None:
         # print("opening")
         if not os.path.exists(index_file):
             with open(index_file, 'w'):
@@ -282,24 +283,24 @@ class Header:
             fhd.write(b'\0')
         # print(f"{f.tell():,d} bytes {f.tell()//1024:,d} Kb {f.tell()//1024//1024:,d} Mb {f.tell()//1024//1024//1024:,d} Gb")
 
-    def init_index_file(self, overwrite: bool=False, mode: str = "r+b"):
+    def init_index_file(self, overwrite: bool=False, mode: str="r+b") -> None:
         self._init_clean(self, overwrite=overwrite)
         return self.init_file(self.index_file, mode=mode)
 
-    def init_index_tmp_file(self, overwrite: bool=False, mode: str = "r+b"):
+    def init_index_tmp_file(self, overwrite: bool=False, mode: str="r+b") -> None:
         self._init_clean(overwrite=overwrite)
         return self.init_file(self.index_tmp_file, mode=mode)
 
 
-    def get_array_from_fhd(self, fhd: BinaryIO, mode: str = "r+") -> Iterator[np.memmap]:
+    def get_array_from_fhd(self, fhd: BinaryIO, mode: str="r+") -> Iterator[np.memmap]:
         for npmm in self._get_mmap(fhd, offset=0, mode=mode):
             yield npmm
 
-    def get_array_from_index_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> Iterator[np.memmap]:
+    def get_array_from_index_file(self, fhd_mode: str="r+b", mm_mode: str="r+") -> Iterator[np.memmap]:
         for fhd in self.open_index_file(mode=fhd_mode):
             return self.get_array_from_fhd(fhd, mode=mm_mode)
 
-    def get_array_from_index_tmp_file(self, fhd_mode: str = "r+b", mm_mode: str = "r+") -> Iterator[np.memmap]:
+    def get_array_from_index_tmp_file(self, fhd_mode: str="r+b", mm_mode: str="r+") -> Iterator[np.memmap]:
         for fhd in self.open_index_tmp_file(mode=fhd_mode):
             return self.get_array_from_fhd(fhd, mode=mm_mode)
 
@@ -324,7 +325,7 @@ class Header:
         self.write_metadata_file(self.index_tmp_file)
 
 
-    def read_metadata(self):
+    def read_metadata(self) -> None:
         with open(self.metadata_file, 'rt') as fhd:
             header_data = json.load(fhd)
 
@@ -414,7 +415,7 @@ class Header:
     def __repr__(self) -> str:
         return str(self)
 
-def gen_checksum(filename: str, chunk_size: int = 2**16) -> str:
+def gen_checksum(filename: str, chunk_size: int=2**16) -> str:
     file_hash = hashlib.sha256()
     with open(filename, "rb") as f:
         chunk = f.read(chunk_size)
@@ -423,3 +424,182 @@ def gen_checksum(filename: str, chunk_size: int = 2**16) -> str:
             chunk = f.read(chunk_size)
 
     return file_hash.hexdigest()
+
+
+
+
+
+def test_np(kmer_len: int, seq: str) -> None:
+    pos_val: List[int] = [4**(kmer_len-p-1) for p in range(kmer_len)]
+
+    seq = tuple(4 if s is None else s for s in seq)
+
+    w = np.array(pos_val, dtype='int64')
+    f = np.array(seq, dtype='int8')
+    f = np.nan_to_num(f, nan=4, copy=False)
+    # print(np.where(f == 4))
+    # f = f[438600:438800]
+    # print(f == 4)
+
+    print("w.shape", w.shape)
+    print("w.dtype", w.dtype)
+    print("f.shape", f.shape)
+    print("f.dtype", f.dtype)
+
+    for fc, (unique, counts) in enumerate(test_np_ord(w, f)):
+        print(" fc", fc+1)
+        print("  unique.shape", unique.shape)
+        print("  unique.dtype", unique.dtype)
+        print("  counts.shape", counts.shape)
+        print("  counts.dtype", counts.dtype)
+        yield unique, counts
+        # for k in ls:
+        #     print(" k", k)
+
+def test_np_ord(w, l) -> None:
+    ws = w.shape[0]
+    # print("w", w)
+
+    kmins = []
+
+    for y in range(ws):
+        m = l[y:]
+        ms = m.shape[0]
+        # print("m.shape", ms)
+
+        lt = m[:ms//ws*ws]
+        lts = lt.shape[0]
+        # print("lt.shape", lts)
+
+        lm = lt.reshape(lts//ws, ws)
+        # print("lm.shape", lm.shape)
+
+        lq = np.any(lm == 4, axis=1)
+
+        lr = lm[~lq]
+        lrs = lr.shape
+        # print("lr", lr)
+        # print("lr.shape", lrs)
+
+        rc_lr = lr[:,::-1]
+        rc    = 3 - rc_lr
+        # print("rc_lr", rc_lr)
+        # print("rc   ", rc)
+
+        lv = lr * w
+        # print("lv      ", lv)
+        # print("lv.shape", lv.shape)
+
+        rc_lv = rc * w
+        # print("rc_lv      ", rc_lv)
+        # print("rc_lv.shape", rc_lv.shape)
+
+        ls = lv.sum(axis=1)
+        # print("ls      ", ls)
+        # print("ls.shape", ls.shape)
+        # print("ls.dtype", ls.dtype)
+
+        rc_ls = rc_lv.sum(axis=1)
+        # print("rc_ls      ", rc_ls)
+        # print("rc_ls.shape", rc_ls.shape)
+        # print("rc_ls.dtype", rc_ls.dtype)
+
+        # ls.sort()
+        # rc_ls.sort()
+
+        kmin = np.minimum(ls, rc_ls)
+        # print("kmin      ", kmin)
+        # print("kmin.shape", kmin.shape)
+        # print("kmin.dtype", kmin.dtype)
+
+        kmins.append(kmin)
+        del kmin
+        del ls
+        del rc_ls
+        del lv
+        del rc_lv
+        del lr
+        del rc_lr
+        del lm
+        del lq
+        del lt
+        del m
+
+        # unique, counts = np.unique(kmin, return_counts=True)
+        # yield unique, counts
+
+    kmins_c = np.concatenate(kmins)
+    del kmins
+    kmins_c.sort()
+
+    print("summarizing")
+    unique, counts = np.unique(kmins_c, return_counts=True)
+    print("unique      ", unique)
+    print("unique.shape", unique.shape)
+    print("unique.dtype", unique.dtype)
+    print("counts.shape", counts.shape)
+    print("counts.dtype", counts.dtype)
+    yield unique, counts
+    del unique
+    del counts
+    del kmins_c
+
+def test_np_example() -> None:
+    w = np.array([4, 5])
+    w
+    # array([4, 5])
+
+    l = np.array([3, 3, 2, 2, 0, 4, 5])
+    l
+    # array([2, 2, 3, 3, 0, 4, 5])
+
+    for y in range(w.shape[0]):
+        print(y)
+
+        m = l[y:]
+        m
+        # 0
+        # array([2, 2, 3, 3, 0, 4, 5])
+        # 1
+        # array([2, 3, 3, 0, 4, 5])
+
+        lt = m[:m.shape[0]//2*2]
+        lt
+        # array([2, 2, 3, 3, 0, 4])
+
+        lm = lt.reshape(lt.shape[0]//2, 2)
+        lm
+        # array([
+        #     [2, 2],
+        #     [3, 3],
+        #     [0, 4]])
+
+        lq = np.any(lm == 0, axis=1)
+        lq
+        # array([False, False,  True])
+
+        lr = lm[~lq]
+        lr
+        # array([
+        #     [2, 2],
+        #     [3, 3]])
+
+        lv = lr * w
+        lv
+        # array([
+        #     [12, 15],
+        #     [ 8, 10]])
+
+        ls = lv.sum(axis=1)
+        ls
+        # array([27, 18])
+
+        ls.sort()
+        ls
+        # array([18, 27])
+
+        # unique, counts = np.unique(ls, return_counts=True)
+        # unique
+        # # array([18, 27])
+        # counts
+        # # array([1, 1])

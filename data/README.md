@@ -14,7 +14,7 @@ for F in data/*.fa.bgz; do
     else
         echo "$F processing  - $K";
         pypy ./indexer.py $F $K;
-        if [[ -f "$G" ]]; then
+        if [[ ! -f "$G" ]]; then
             echo "$F compressing - $K - $G";
             bgzip -i -I $G.bgz.gzi -l 9 -c $G > $G.bgz.tmp && mv $G.bgz.tmp $Z;
         fi
