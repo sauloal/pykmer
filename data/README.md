@@ -3,15 +3,21 @@
 ## Process
 
 ```bash
+K=15
 for F in data/*.fa.bgz; do
-    echo $F
+    echo $F;
+    G=$F.$K.kin;
+    Z=$G.bgz;
     
-    if [[ -f "$F.bgz" ]]; then
-        echo " exists"
+    if [[ -f "$Z" ]]; then
+        echo "$F exists";
     else
-        echo " processing"
-        pypy ./indexer.py $F 15
-        bgzip -i -I $F.bgz.gzi -l 9 -c $F > $F.bgz.tmp && mv $F.bgz.tmp $F.bgz
+        echo "$F processing  - $K";
+        pypy ./indexer.py $F $K;
+        if [[ -f "$G" ]]; then
+            echo "$F compressing - $K - $G";
+            bgzip -i -I $G.bgz.gzi -l 9 -c $G > $G.bgz.tmp && mv $G.bgz.tmp $Z;
+        fi
     fi
 done
 ```
@@ -92,6 +98,8 @@ download_fasta     Solanum_lycopersicoides_LA2951_v1.0_chromosomes.fa.bgz       
 download_fasta     Solanum_lycopersicum_cerasiforme_LA1673_r1.1.fa.bgz                     ${CORNELL}/Solanum_lycopersicum_cerasiforme/LA1673/SLYcer_r1.1.fasta
 download_fasta_gz  Solanum_lycopersicum_FLA1.3.fa.bgz                                      ${CORNELL}/Solanum_lycopersicum/Fla.8924/FLA1.3_genome.fasta.gz
 download_fasta_gz  Solanum_lycopersicum_M82_1.3_genome.fa.bgz                              ${CORNELL}/Solanum_lycopersicum/M82/M821.3_genome.fasta.gz
+download_fasta_gz  Solanum_lycopersicum_scaffolds.1.00.fa.bgz                              ${CORNELL}/Solanum_lycopersicum/Heinz1706/wgs/assembly/build_1.00/S_lycopersicum_scaffolds.1.00.fa.gz
+download_fasta_gz  Solanum_lycopersicum_chromosomes.4.00.fa.bgz                            ${CORNELL}/Solanum_lycopersicum/Heinz1706/wgs/assembly/build_4.00/S_lycopersicum_chromosomes.4.00.fa.gz
 download_fasta     Solanum_melongena_HQ-1315_HQ-reference.fa.bgz                           ${CORNELL}/Solanum_melongena_HQ-1315/01.SME-HQ-reference.fasta
 download_fasta_gz  Solanum_melongena_r2.5.1.fa.bgz                                         ${CORNELL}/Solanum_melongena/SME_r2.5.1.fa.gz
 download_fasta     Solanum_pimpinellifolium_LA1589_2020_v0.1_chromosomes.fa.bgz            ${CORNELL}/Solanum_pimpinellifolium/LA1589/2020/SpimLA1589_v0.1_chromosomes.fa
