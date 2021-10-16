@@ -59,16 +59,19 @@ class Timer:
         return rep
 
 
-class Header:
-    HEADER_VER      : bytes     = 1
+class HeaderVars:
+    HEADER_VER      : bytes     = b'KMER001'
     # HEADER_VER      : bytes     = b'KMER001'
     # HEADER_VAL_FMT  : str       = '<Q'
     # HEADER_VAL_SIZE : int       = struct.calcsize(HEADER_VAL_FMT)
-    HEADER_VAL_NAMES: List[str] = ['kmer_len']
+    # HEADER_VAL_NAMES: List[str] = ['kmer_len']
     # HEADER_LEN      : int       = len(HEADER_VER) + HEADER_VAL_SIZE
+    HEADER_FIXED    : List[str] = ["file_ver", "kmer_size", "data_size", "max_size"]
     HEADER_DATA     : List[str] = [
         "project_name"       ,
         "kmer_len"           ,
+        "flush_every"        ,
+        "frag_size"          ,
         "input_file_name"    , "input_file_path"  ,
         "input_file_size"    , "input_file_ctime" , "input_file_cheksum" ,
         "output_file_size"   , "output_file_ctime", "output_file_cheksum",
@@ -79,21 +82,35 @@ class Header:
         "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
         "vals_sum"           , "vals_count"       , "vals_min"         , "vals_max"
     ]
-    IND_EXT  = 'kin'
-    DESC_EXT = 'json'
-    TMP      = 'tmp'
 
+    IND_EXT  :str = 'kin'
+    DESC_EXT :str = 'json'
+    TMP      :str = 'tmp'
+
+    DEFAULT_FLUSH_EVERY   :int =   500_000_000
+    DEFAULT_MIN_FRAG_SIZE :int =   500_000_000
+    DEFAULT_MAX_FRAG_SIZE :int = 1_000_000_000
+    DEFAULT_BUFFER_SIZE   :int = io.DEFAULT_BUFFER_SIZE
+
+
+class Header(HeaderVars):
     def __init__(self,
             project_name   : str,
             input_file     : Union[str, None] = None,
             kmer_len       : Union[int, None] = None,
             index_file     : Union[str, None] = None,
-            buffer_size    : int = io.DEFAULT_BUFFER_SIZE):
-
+            frag_size      : int = None,
+            flush_every    : int = HeaderVars.DEFAULT_FLUSH_EVERY,
+            min_frag_size  : int = HeaderVars.DEFAULT_MIN_FRAG_SIZE,
+            max_frag_size  : int = HeaderVars.DEFAULT_MAX_FRAG_SIZE,
+            buffer_size    : int = HeaderVars.DEFAULT_BUFFER_SIZE,
+    ):
         self.project_name          :str         = project_name
         self.input_file_name       :str         = os.path.basename(input_file) if input_file else input_file
         self.input_file_path       :str         = os.path.abspath( input_file) if input_file else input_file
         self.kmer_len              :int         = kmer_len
+        self.flush_every           :int         = flush_every
+
         self._buffer_size          :int         = buffer_size
 
         self.input_file_size       :int         = None
@@ -134,6 +151,16 @@ class Header:
         assert self.kmer_len
         assert self.kmer_len > 0
         assert self.kmer_len % 2 == 1
+
+        if frag_size is not None:
+            self.frag_size             :int         = frag_size
+
+        else:
+            self.frag_size             :int         = self.data_size // 10
+
+            if max_frag_size is not None and self.frag_size > max_frag_size : self.frag_size = max_frag_size
+            if min_frag_size is not None and self.frag_size < min_frag_size : self.frag_size = min_frag_size
+            if                               self.frag_size > self.data_size: self.frag_size = self.data_size
 
     @property
     def index_file(self) -> str:
@@ -313,7 +340,8 @@ class Header:
         for fhd in self.open_file(index_file):
             self.update_stats(fhd)
 
-        header_data = {k: getattr(self,k) for k in self.HEADER_DATA}
+        # header_data = {k: getattr(self,k) for k in self.HEADER_DATA}
+        header_data = self.to_dict()
 
         with open(self.metadata_file, 'wt') as fhm:
             json.dump(header_data, fhm, indent=1, sort_keys=1)
@@ -335,6 +363,11 @@ class Header:
             v = header_data[k]
             # print(f"{k:20s}: {str(v)[:50]}")
             setattr(self, k, v)
+
+        for k in self.HEADER_FIXED:
+            v = getattr(self, k)
+            h = header_data[k]
+            assert v == h, f"self.{k} != header_data[{k}]: {v} != {h}"
 
 
     def check_data(self, fhd: BinaryIO) -> None:
@@ -371,12 +404,6 @@ class Header:
     def check_data_index_tmp(self) -> None:
         self.check_data_file(self.index_tmp_file)
 
-    def __iter__(self) -> Iterator[int]:
-        for fhd in self.open_index_file():
-            c = fhd.read(1)
-            while c:
-                yield c[0]
-                c = fhd.read(1)
 
     def calculate_distance(self, other: "Header", min_count: int=1):
         s_count = 0
@@ -394,7 +421,7 @@ class Header:
 
     def to_dict(self) -> Dict[str, Any]:
         data = OrderedDict()
-        for k in ["file_ver", "kmer_len", "kmer_size", "data_size", "max_size"] + self.HEADER_DATA:
+        for k in self.HEADER_FIXED + self.HEADER_DATA:
             v = getattr(self, k)
             data[k] = v
         return data
@@ -402,6 +429,13 @@ class Header:
     def to_json(self, indent: int=1, sort_keys: bool=True) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=sort_keys)
 
+
+    def __iter__(self) -> Iterator[int]:
+        for fhd in self.open_index_file():
+            c = fhd.read(1)
+            while c:
+                yield c[0]
+                c = fhd.read(1)
 
     def __str__(self) -> str:
         res = []
@@ -414,6 +448,7 @@ class Header:
 
     def __repr__(self) -> str:
         return str(self)
+
 
 def gen_checksum(filename: str, chunk_size: int=2**16) -> str:
     file_hash = hashlib.sha256()

@@ -2,7 +2,6 @@
 
 import os
 import sys
-import io
 import gzip
 
 from typing import Iterator, Tuple, Union, List, TextIO
@@ -300,13 +299,21 @@ def create_fasta_index(
         input_file   : str,
         kmer_len     : int,
         overwrite    : bool,
-        FLUSH_EVERY  : int  =   500_000_000,
-        min_frag_size: int  =   500_000_000,
-        max_frag_size: int  = 1_000_000_000,
-        buffer_size  : int  = io.DEFAULT_BUFFER_SIZE,
+        flush_every  : int  = Header.DEFAULT_FLUSH_EVERY,
+        min_frag_size: int  = Header.DEFAULT_MIN_FRAG_SIZE,
+        max_frag_size: int  = Header.DEFAULT_MAX_FRAG_SIZE,
+        buffer_size  : int  = Header.DEFAULT_BUFFER_SIZE,
         debug        : bool = False) -> None:
 
-    header = Header(project_name, input_file=input_file, kmer_len=kmer_len, buffer_size=buffer_size)
+    header = Header(
+        project_name,
+        input_file    = input_file,
+        kmer_len      = kmer_len,
+        flush_every   = flush_every,
+        min_frag_size = min_frag_size,
+        max_frag_size = max_frag_size,
+        buffer_size   = buffer_size
+    )
 
     print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d} bytes {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
     # print(header)
@@ -319,14 +326,10 @@ def create_fasta_index(
 
     num_kmers        = 0
     list_pos         = 0
-    kmers            = np.zeros(dtype=np.uint64, shape=(FLUSH_EVERY,))
+    kmers            = np.zeros(dtype=np.uint64, shape=(flush_every,))
     hist             = None
     last_chrom_num   = None
-    frag_size        = header.data_size // 10
-
-    if frag_size > max_frag_size   : frag_size = max_frag_size
-    if frag_size < min_frag_size   : frag_size = min_frag_size
-    if frag_size > header.data_size: frag_size = header.data_size
+    frag_size        = header.frag_size
 
     # for chrom_num, name, pos, count, mm in gen_kmers(input_file, kmer_len, opener):
     chromosomes = []
@@ -335,16 +338,16 @@ def create_fasta_index(
         num_kmers        += 1
         # if chrom_kmer_num >= 1_000_000: continue
 
-        if last_chrom_num != chrom_num or list_pos >= FLUSH_EVERY: #todo: do every N million bp instead of whole chromosomes
+        if last_chrom_num != chrom_num or list_pos >= flush_every: #todo: do every N million bp instead of whole chromosomes
             last_list_pos = list_pos
 
             if last_chrom_num == chrom_num: #todo: do every N million bp instead of whole chromosomes
-                if list_pos < (FLUSH_EVERY // 2):
-                    print(f"  {name} list_pos {list_pos:15,d} FLUSH_EVERY {FLUSH_EVERY:15,d} frag_size {frag_size:15,d}. skipping flushing")
+                if list_pos < (flush_every // 2):
+                    print(f"  {name} list_pos {list_pos:15,d} flush_every {flush_every:15,d} frag_size {frag_size:15,d}. skipping flushing")
                     last_chrom_num = chrom_num
                     continue
                 else:
-                    print(f"  {FLUSH_EVERY:15,d} {name} {last_list_pos:15,d}")
+                    print(f"  {flush_every:15,d} {name} {last_list_pos:15,d}")
 
             if list_pos > 0:
                 hist_k = process_kmers(kmers[:list_pos], header, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
@@ -475,7 +478,7 @@ def main() -> None:
 
         project_name    = input_file
 
-        buffer_size = 2**16
+        buffer_size     = 2**16
         # buffer_size = io.DEFAULT_BUFFER_SIZE
 
         print(f"project_name {project_name:s} input_file {input_file:s} kmer_len {kmer_len:15,d}")
