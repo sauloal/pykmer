@@ -68,9 +68,10 @@ def parse_fasta(fhd: TextIO, timer: Timer, print_every: int=25_000_000) -> Itera
                 if bp_num // print_every > bp_last_e:
                     timer.update(bp_num)
                     bp_last_e   = bp_num // print_every
-                    print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
-                    print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
-                    print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
+                    print(f"seq_name    : {seq_name:25s}")
+                    print(f"  seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
+                    print(f"  bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>15s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+                    print(f"  bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>15s} speed_delta: {timer.speed_delta:15,d} bp/s")
                 seq_str  = (ord(s) for b in seq for s in b)
                 seq_str  = tuple(conv[s] for s in seq_str)
                 seq_len  = len(seq_str)
@@ -83,9 +84,10 @@ def parse_fasta(fhd: TextIO, timer: Timer, print_every: int=25_000_000) -> Itera
             seq.append(line)
 
     if seq_name is not None:
-        print(f"seq_name: {seq_name:25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
-        print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
-        print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
+        print(f"seq_name    : {seq_name:25s}")
+        print(f"  seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
+        print(f"  bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>15s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+        print(f"  bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>15s} speed_delta: {timer.speed_delta:15,d} bp/s")
         seq_str  = (ord(s) for b in seq for s in b)
         seq_str  = tuple(conv[s] for s in seq_str)
         seq_len  = len(seq_str)
@@ -93,8 +95,8 @@ def parse_fasta(fhd: TextIO, timer: Timer, print_every: int=25_000_000) -> Itera
         yield seq_name, seq_str, seq_len
 
     print(f"seq_name: {'DONE'  :25s} seq_num   : {seq_num        :15,d} line_num  : {line_num          :15,d}")
-    print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>14s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
-    print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>14s} speed_delta: {timer.speed_delta:15,d} bp/s")
+    print(f"          {''      :25s} bp_num    : {timer.val_last :15,d} time_ela  : {timer.time_ela_s  :>15s} speed_ela  : {timer.speed_ela  :15,d} bp/s")
+    print(f"          {''      :25s} bp_delta  : {timer.val_delta:15,d} time_delta: {timer.time_delta_s:>15s} speed_delta: {timer.speed_delta:15,d} bp/s")
 
 def read_fasta(input_file: Union[str, None], timer: Timer) -> Iterator[Tuple[str, str, int]]:
     filehandler = None
@@ -341,15 +343,19 @@ def create_fasta_index(
         if last_chrom_num != chrom_num or list_pos >= flush_every: #todo: do every N million bp instead of whole chromosomes
             last_list_pos = list_pos
 
-            if last_chrom_num == chrom_num: #todo: do every N million bp instead of whole chromosomes
-                if list_pos < (flush_every // 2):
-                    print(f"  {name} list_pos {list_pos:15,d} flush_every {flush_every:15,d} frag_size {frag_size:15,d}. skipping flushing")
-                    last_chrom_num = chrom_num
-                    continue
-                else:
-                    print(f"  {flush_every:15,d} {name} {last_list_pos:15,d}")
 
-            if list_pos > 0:
+            if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
+                print(f"  new chrom {name} {chrom_num:03d} {last_list_pos:15,d}")
+                chromosomes.append((name, seq_len)) #todo: ignore if fastq file
+
+
+            if list_pos == 0 or list_pos < flush_every:
+                print(f"  {name} list_pos {list_pos:15,d} flush_every {flush_every:15,d} frag_size {frag_size:15,d}. skipping flushing")
+                last_chrom_num = chrom_num
+
+            else:
+                print(f"  {name} list_pos {list_pos:15,d} flush_every {flush_every:15,d} frag_size {frag_size:15,d}. FLUSHING")
+
                 hist_k = process_kmers(kmers[:list_pos], header, frag_size=frag_size, debug=(kmer_len <= 5 and DEBUG) or debug)
 
                 if hist is None: hist  = hist_k
@@ -363,10 +369,6 @@ def create_fasta_index(
 
                 list_pos = 0
                 # if chrom_num == 2: break
-
-            if last_chrom_num != chrom_num: #todo: do every N million bp instead of whole chromosomes
-                print(f"  new chrom {name} {chrom_num:03d} {last_list_pos:15,d}")
-                chromosomes.append((name, seq_len)) #todo: ignore if fastq file
 
             last_chrom_num = chrom_num
 

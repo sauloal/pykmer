@@ -3,23 +3,28 @@
 ## Process
 
 ```bash
+
+rm data/*.tmp
 K=15
 for F in data/*.fa.bgz; do
-    echo $F;
     G=$F.$K.kin;
     Z=$G.bgz;
+    echo "$F - $K - $G - $Z";
     
     if [[ -f "$Z" ]]; then
-        echo "$F exists";
+        echo "$F - $K - $G - $Z - exists";
     else
-        echo "$F processing  - $K";
-        pypy ./indexer.py $F $K;
+        echo "$F - $K - $G - $Z - processing";
         if [[ ! -f "$G" ]]; then
-            echo "$F compressing - $K - $G";
-            bgzip -i -I $G.bgz.gzi -l 9 -c $G > $G.bgz.tmp && mv $G.bgz.tmp $Z;
+            time pypy ./indexer.py $F $K;
+        fi
+        if [[ ! -f "$Z" ]]; then
+            echo "$F - $K - $G - $Z - compressing";
+            time bgzip -i -I $G.bgz.gzi -l 9 -c $G > $G.bgz.tmp && mv -v $G.bgz.tmp $Z && rm -v $G;
         fi
     fi
 done
+
 ```
 
 ## Download

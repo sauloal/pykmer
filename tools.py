@@ -60,7 +60,7 @@ class Timer:
 
 
 class HeaderVars:
-    HEADER_VER      : bytes     = b'KMER001'
+    HEADER_VER      : str       = 'KMER001'
     # HEADER_VER      : bytes     = b'KMER001'
     # HEADER_VAL_FMT  : str       = '<Q'
     # HEADER_VAL_SIZE : int       = struct.calcsize(HEADER_VAL_FMT)
@@ -87,7 +87,7 @@ class HeaderVars:
     DESC_EXT :str = 'json'
     TMP      :str = 'tmp'
 
-    DEFAULT_FLUSH_EVERY   :int =   500_000_000
+    DEFAULT_FLUSH_EVERY   :int =   100_000_000
     DEFAULT_MIN_FRAG_SIZE :int =   500_000_000
     DEFAULT_MAX_FRAG_SIZE :int = 1_000_000_000
     DEFAULT_BUFFER_SIZE   :int = io.DEFAULT_BUFFER_SIZE
