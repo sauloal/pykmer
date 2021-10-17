@@ -4,7 +4,7 @@ import os
 import sys
 import gzip
 
-from typing import Iterator, Tuple, Union, List, TextIO
+from typing import Iterator, Tuple, Union, TextIO, List
 
 import gc
 

@@ -8,6 +8,7 @@ rm data/*.tmp
 K=15
 for F in data/*.fa.bgz; do
     G=$F.$K.kin;
+    L=$F.$K.kin.log;
     Z=$G.bgz;
     echo "$F - $K - $G - $Z";
     
@@ -16,7 +17,7 @@ for F in data/*.fa.bgz; do
     else
         echo "$F - $K - $G - $Z - processing";
         if [[ ! -f "$G" ]]; then
-            time pypy ./indexer.py $F $K;
+            time pypy ./indexer.py $F $K | tee $L;
         fi
         if [[ ! -f "$Z" ]]; then
             echo "$F - $K - $G - $Z - compressing";

@@ -1,12 +1,13 @@
 import os
 import io
 import json
-import datetime
+import math
 import socket
+import datetime
 import hashlib
 
 from collections import OrderedDict
-from typing import Tuple, Union, List, NewType, BinaryIO, Dict, Any, Iterator
+from typing import Tuple, Union, BinaryIO, Iterator, NewType, Dict, Any, List
 
 import numpy as np
 import bgzip
@@ -161,6 +162,11 @@ class Header(HeaderVars):
             if max_frag_size is not None and self.frag_size > max_frag_size : self.frag_size = max_frag_size
             if min_frag_size is not None and self.frag_size < min_frag_size : self.frag_size = min_frag_size
             if                               self.frag_size > self.data_size: self.frag_size = self.data_size
+            if (self.data_size % frag_size) < (self.data_size // 2):
+                pieces = (self.data_size // self.frag_size)
+                self.frag_size = self.data_size // (pieces + 1)              # divide in an extra piece to even spread kmers
+                self.frag_size = self.frag_size  + (pieces + 1) + 1          # add the number of pieces to the frag size so we don't end up with a tiny piece in the end
+                self.frag_size = int(math.ceil(self.frag_size/1_000)*1_000)  # round UP to the nearest 1_000
 
     @property
     def index_file(self) -> str:
