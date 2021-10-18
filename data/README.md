@@ -21,7 +21,7 @@ for F in data/*.fa.bgz; do
         fi
         if [[ ! -f "$Z" ]]; then
             echo "$F - $K - $G - $Z - compressing";
-            time bgzip -i -I $G.bgz.gzi -l 9 -c $G > $G.bgz.tmp && mv -v $G.bgz.tmp $Z && rm -v $G;
+            time bgzip -i -I $Z.gzi -l 9 -c $G > $Z.tmp && mv -v $Z.tmp $Z && rm -v $G;
         fi
     fi
 done
