@@ -26,9 +26,9 @@ DataType   = NewType('DataType'  , List[Metadata])
 
 EXTS = (
     '.'+Header.IND_EXT,
-    '.'+Header.IND_EXT+'.bgz',
+    '.'+Header.IND_EXT+'.'+Header.COMP_EXT,
     '.kma',
-    '.kma.bgz'
+    '.kma.'+Header.COMP_EXT
 )
 
 
@@ -36,12 +36,14 @@ def merge(indexes: List[str], min_count: int=1) -> Tuple[DataType, ResultType]:
     data: DataType = [None] * len(indexes)
     kmer_len = None
     for k, kin in enumerate(indexes):
+        print(f"verifying {kin}")
         assert kin.endswith(EXTS) , f"all files must be .{Header.IND_EXT}[.bgz]: {kin}"
         assert os.path.exists(kin), f"all files must exist: {kin}"
 
-        desc = kin[:-4] if kin.endswith('.bgz') else kin
+        desc = kin[:-1*(len(Header.COMP_EXT)+1)] if kin.endswith('.'+Header.COMP_EXT) else kin
         desc = f"{desc}.{Header.DESC_EXT}"
-        assert os.path.exists(desc), f"all .{Header.IND_EXT}[.bgz] files must have a associated .{Header.IND_EXT}.{Header.DESC_EXT}: {desc}"
+
+        assert os.path.exists(desc), f"all .{Header.IND_EXT}[.{Header.COMP_EXT}] files must have a associated .{Header.IND_EXT}.{Header.DESC_EXT}: {desc}"
 
         header = Header(kin, index_file=kin)
 
@@ -57,19 +59,23 @@ def merge(indexes: List[str], min_count: int=1) -> Tuple[DataType, ResultType]:
             "header"          : header
         }
 
+    print()
+    # exit(0)
     # print(json.dumps(data, indent=1))
 
     res:ResultType = OrderedDict()
     for k in range(len(data)-1):
         k_data:Metadata = data[k]
         k_header:Header = k_data["header"]
-        print(k_data["index_file"])
+        print("comparing", k_data["index_file"])
         for l in range(k+1, len(data)):
             l_data:Metadata = data[l]
+            print(" versus", l_data["index_file"])
+            sys.stdout.flush()
             l_header:Header = l_data["header"]
             k_header.calculate_distance(l_header)
             k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count)
-            print(" ", l_data["index_file"], k_count, l_count, s_count)
+            print("   res", l_data["index_file"], k_count, l_count, s_count)
             res[(k,l)] = (k_count, l_count, s_count)
 
     return data, res
@@ -81,6 +87,9 @@ def main() -> None:
     if len(indexes) <= 1:
         print("needs at least 2 files")
         sys.exit(1)
+
+    indexes.sort()
+    # print(indexes)
 
     merge(indexes)
 

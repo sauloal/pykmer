@@ -87,6 +87,7 @@ class HeaderVars:
     IND_EXT  :str = 'kin'
     DESC_EXT :str = 'json'
     TMP      :str = 'tmp'
+    COMP_EXT :str = 'bgz'
 
     DEFAULT_FLUSH_EVERY   :int =   100_000_000
     DEFAULT_MIN_FRAG_SIZE :int =   500_000_000
@@ -167,7 +168,7 @@ class Header(HeaderVars):
                 self.frag_size = self.data_size // (pieces + 1)              # divide in an extra piece to even spread kmers
                 self.frag_size = self.frag_size  + (pieces + 1) + 1          # add the number of pieces to the frag size so we don't end up with a tiny piece in the end
                 self.frag_size = int(math.ceil(self.frag_size/1_000)*1_000)  # round UP to the nearest 1_000
-            print(self.frag_size)
+            # print(self.frag_size)
 
     @property
     def index_file(self) -> str:
@@ -203,18 +204,23 @@ class Header(HeaderVars):
 
 
     def _parse_index_file_name(self, index_file: str) -> None:
-        index_file = index_file[:-4] if index_file.endswith('.bgz') else index_file
-        ext_len    = ((2 + 1) + (len(self.IND_EXT) + 1))
-        ext        = index_file[ext_len * -1:]
+        index_file = index_file[:-1*(len(self.COMP_EXT)+1)] if index_file.endswith('.'+self.COMP_EXT) else index_file
+        ext_len    = (2 + 1 + len(self.IND_EXT) + 1)
+        ext        = index_file[(ext_len-1) * -1:]
         # print(f"index_file {index_file}")
+        # print(f"ext_len    {ext_len}")
         # print(f"ext        {ext}")
 
         if self.input_file_name is None:
-            self.input_file_name = index_file[:ext_len * -1]
+            input_file_name      = index_file[:ext_len * -1]
+            self.input_file_name = os.path.basename(input_file_name)
+            self.input_file_path = os.path.abspath( input_file_name)
+
             # print(f"input_file_name {self.input_file_name}")
+            # print(f"input_file_path {self.input_file_path}")
         
         if self.kmer_len is None:
-            self.kmer_len        = int(ext[1:3])
+            self.kmer_len        = int(ext[:2])
             # print(f"kmer_len {self.kmer_len}")
 
     def _get_mmap(self, fhd: BinaryIO, offset: int=0, mode: str="r+") -> Iterator[np.memmap]:
