@@ -1,5 +1,7 @@
 import os
 import io
+import gc
+import sys
 import json
 import math
 import socket
@@ -10,6 +12,8 @@ from collections import OrderedDict
 from typing import Tuple, Union, BinaryIO, Iterator, NewType, Dict, Any, List
 
 import numpy as np
+
+import gzip
 import bgzip
 
 Datetime    = NewType('Datetime'   , datetime.datetime)
@@ -278,10 +282,14 @@ class Header(HeaderVars):
 
 
     def open_file(self, index_file: str, mode: str="r+b") -> Iterator[BinaryIO]:
+        # print("opening", index_file)
         if index_file.endswith('.bgz'):
-            with open(index_file, mode, buffering=self._buffer_size) as raw:
-                with bgzip.BGZipReader(raw) as fhd:
-                    yield fhd
+            # with open(index_file, mode, buffering=self._buffer_size) as raw:
+            #     with bgzip.BGZipReader(raw) as fhd:
+            #         yield fhd
+            with open(index_file, mode, buffering=self._buffer_size) as fhd:
+                with gzip.open(fhd,"rb") as fhz:
+                    yield fhz
         else:
             with open(index_file, mode, buffering=self._buffer_size) as fhd:
                 yield fhd
@@ -418,17 +426,76 @@ class Header(HeaderVars):
         self.check_data_file(self.index_tmp_file)
 
 
-    def calculate_distance(self, other: "Header", min_count: int=1):
+    def calculate_distance(self, other: "Header", min_count: int=1, max_count: int=255, blk_size: int=100_000_000):
+        s_count = 0
+        o_count = 0
+        c_count = 0
+        blk_sum = 0
+        assert self.data_size == other.data_size
+
+        for s_fhd in self.open_index_file():
+            for o_fhd in other.open_index_file():
+                for blk_num, blk_start in enumerate(range(0,self.data_size,blk_size)):                    
+                    blk_end      = blk_start + blk_size
+                    blk_size_eff = blk_size
+                    if blk_end > self.data_size:
+                        blk_end      = self.data_size - blk_start
+                        blk_size_eff = self.data_size - blk_start
+                    blk_sum += blk_size_eff
+                    # print(blk_start, blk_end)
+
+                    sys.stdout.write(f" {blk_num+1:15,d} {blk_start+1:15,d}/{self.data_size:15,d} ({(blk_start+1)/self.data_size*100.0:6.2f}%)")
+                    sys.stdout.flush()
+                    
+                    if ((blk_num + 1) % 3) == 0:
+                        print()
+
+                    s_blk = np.frombuffer(s_fhd.read(blk_size_eff), dtype=np.uint8, count=blk_size_eff)
+                    o_blk = np.frombuffer(o_fhd.read(blk_size_eff), dtype=np.uint8, count=blk_size_eff)
+                    assert s_blk.shape == o_blk.shape, f"s_blk.shape {s_blk.shape} == {o_blk.shape} o_blk.shape"
+                    # print(s_blk)
+                    # print(o_blk)
+
+                    s_valid = (s_blk >= min_count) & (s_blk <= max_count)
+                    o_valid = (o_blk >= min_count) & (o_blk <= max_count)
+                    c_valid = s_valid & o_valid
+                    # print(s_valid)
+                    # print(o_valid)
+                    # print(c_valid)
+
+                    s_count += np.sum(s_valid).item()
+                    o_count += np.sum(o_valid).item()
+                    c_count += np.sum(c_valid).item()
+                    # print(s_count)
+                    # print(o_count)
+                    # print(c_count)
+
+                    del s_blk
+                    del o_blk
+                    gc.collect()
+
+        print()
+        assert blk_sum == self.data_size
+        return s_count, o_count, c_count
+
+
+    def calculate_distance2(self, other: "Header", min_count: int=1, max_count: int=255):
         s_count = 0
         o_count = 0
         c_count = 0
         for pos, (s_char, o_char) in enumerate(zip(self, other)):
-            s_valid = s_char >= min_count
-            o_valid = o_char >= min_count
+            if ((pos + 1) % 5_000_000) == 0:
+                sys.stdout.write(f" {pos+1:15,d}/{self.data_size:15,d} ({(pos+1)/self.data_size*100.0:6.2f}%)")
+                sys.stdout.flush()
+            if ((pos + 1) % 15_000_000) == 0:
+                print()
+            s_valid = s_char >= min_count and s_char <= max_count
+            o_valid = o_char >= min_count and o_char <= max_count
             s_count += 1 if s_valid             else 0
             o_count += 1 if o_valid             else 0
             c_count += 1 if s_valid and o_valid else 0
             # print(f"{pos:15,d} {s_char:3d} {o_char:3d} {s_count:15,d} {o_count:15,d} {c_count:15,d}")
+        print()
         return s_count, o_count, c_count
 
 
@@ -445,10 +512,11 @@ class Header(HeaderVars):
 
     def __iter__(self) -> Iterator[int]:
         for fhd in self.open_index_file():
-            c = fhd.read(1)
-            while c:
-                yield c[0]
-                c = fhd.read(1)
+            cs = fhd.read(self._buffer_size)
+            while cs:
+                for c in cs:
+                    yield c
+                cs = fhd.read(self._buffer_size)
 
     def __str__(self) -> str:
         res = []

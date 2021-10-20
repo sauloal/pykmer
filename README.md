@@ -20,6 +20,8 @@ bgzip -i -I $F.bgz.gzi -l 9 -c $F > $F.bgz
 ./gzireader.py $F.bgz.gzi
 
 ./merger.py $F.bgz $F.bgz
+
+pypy ./merger.py data/*.15.kin.bgz
 ```
 
 ## Benchmark
