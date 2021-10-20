@@ -8,7 +8,9 @@
 *.gzi
 *.7z
 *.xz
-__pycache__/
 *.swp
+*.kma
+*.kma.json
+__pycache__/
 data/
 examples/

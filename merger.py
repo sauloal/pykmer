@@ -9,6 +9,8 @@ from typing import Dict, List, Tuple, NewType
 
 #https://stackoverflow.com/questions/18478287/making-object-json-serializable-with-regular-encoder/18561055#18561055
 
+import numpy as np
+
 import json
 from json import JSONEncoder
 
@@ -70,11 +72,12 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
     # print(json.dumps(data, indent=1))
 
     matrix:ResultType = [None] * len(data)
+    matrix = np.ndarray(shape=(len(data),len(data),3), dtype=np.uint64)
     for k in range(len(data)-1):
         k_data:Metadata = data[k]
         k_header:Header = k_data["header"]
         print("comparing", k_data["index_file"])
-        matrix[k] = [None] * len(data)
+        # matrix[k] = [None] * len(data)
         for l in range(k+1, len(data)):
             l_data:Metadata = data[l]
             print(" versus", l_data["index_file"])
@@ -83,7 +86,9 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
             # k_header.calculate_distance(l_header)
             k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, blk_size=blk_size)
             print(f"   matrix Total #1 {k_count:15,d} Total #2 {l_count:15,d} Shared {s_count:15,d}")
-            matrix[k][l] = (k_count, l_count, s_count)
+            # matrix[k][l] = (k_count, l_count, s_count)
+            matrix[k,l,:] = (k_count, l_count, s_count)
+            matrix[l,k,:] = (l_count, k_count, s_count)
 
 
     output = {
@@ -91,12 +96,17 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
         "min_count"   : min_count,
         "max_count"   : max_count,
         "data"        : data,
-        "matrix"      : matrix
     }
 
-    print(f"saving {project_name}.kma")
-    with gzip.open(outfile+'.tmp', "wt") as fhd:
+
+    print(f"saving {outfile}.json")
+    with open(outfile+'.json.tmp', "wt") as fhd:
         json.dump(output, fhd, sort_keys=True, indent=1)
+    os.rename(outfile+'.json.tmp', outfile+'.json')
+
+    print(f"saving {outfile}")
+    with open(outfile+'.tmp', "wb") as fhd:
+        np.savez_compressed(fhd, matrix=matrix)
     os.rename(outfile+'.tmp', outfile)
 
     return data, matrix
@@ -104,7 +114,7 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
 
 def main() -> None:
     project_name = sys.argv[1]
-    indexes      = sys.argv[2:]
+    indexes      = sys.argv[2:5]
 
     if len(indexes) <= 1:
         print("needs at least 2 files")

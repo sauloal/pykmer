@@ -485,7 +485,7 @@ class Header(HeaderVars):
         c_count = 0
         for pos, (s_char, o_char) in enumerate(zip(self, other)):
             if ((pos + 1) % 5_000_000) == 0:
-                sys.stdout.write(f" {pos+1:15,d}/{self.data_size:15,d} ({(pos+1)/self.data_size*100.0:6.2f}%)")
+                sys.stdout.write(f" {pos+1:7,d}/{self.data_size:15,d} ({(pos+1)/self.data_size*100.0:6.2f}%)")
                 sys.stdout.flush()
             if ((pos + 1) % 15_000_000) == 0:
                 print()
