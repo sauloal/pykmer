@@ -114,7 +114,7 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
 
 def main() -> None:
     project_name = sys.argv[1]
-    indexes      = sys.argv[2:5]
+    indexes      = sys.argv[2:]
 
     if len(indexes) <= 1:
         print("needs at least 2 files")

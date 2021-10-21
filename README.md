@@ -39,6 +39,29 @@ pypy ./merger.py data/*.15.kin.bgz
 |  X 19  |             |                |      257G  |         |        |       |       |
 |  X 21  |             |                |        4T  |         |        |       |       |
 
+
+## Merge
+
+```bash
+time pypy ./merger.py merged data/*.15.kin.bgz
+```
+
+```text
+comparing data/Solanum_tuberosum_PGSC_DM_v4.03_pseudomolecules.fa.bgz.15.kin.bgz
+ versus data/Vitis_vinifera_Genoscope_12X_2010_02_12_chr.fa.bgz.15.kin.bgz
+               1               1/  1,073,741,824 (  0.00%)               2     100,000,001/  1,073,741,824 (  9.31%)               3     200,000,001/  1,073,741,824 ( 18.63%)
+               4     300,000,001/  1,073,741,824 ( 27.94%)               5     400,000,001/  1,073,741,824 ( 37.25%)               6     500,000,001/  1,073,741,824 ( 46.57%)
+               7     600,000,001/  1,073,741,824 ( 55.88%)               8     700,000,001/  1,073,741,824 ( 65.19%)               9     800,000,001/  1,073,741,824 ( 74.51%)
+              10     900,000,001/  1,073,741,824 ( 83.82%)              11   1,000,000,001/  1,073,741,824 ( 93.13%)
+   matrix Total #1     172,022,482 Total #2     145,297,478 Shared      84,710,204
+saving merged.kma.json
+saving merged.kma
+
+real    333m56.907s
+user    303m45.443s
+sys     29m45.602s
+```
+
 ## Output
 
 `.kin`
@@ -108,6 +131,75 @@ Where:
 - `hist` are the number of kmers with the coverate equal to the position in the `array + 1`. `array[0] = 100` means 100 kmers have coverage of `1`.
 
 - Maximum coverage is `255` with 1 byte per k-mer
+
+```text
+-rw-r--r-- 1 saulo saulo 9.4K Oct 21 05:38 merged.kma
+-rw-r--r-- 1 saulo saulo 305M Oct 21 05:38 merged.kma.json
+```
+
+`.kma`
+
+Numpy Savez with matrix as `matrix` key.
+
+`.kma.json`
+
+```json
+{
+ "max_count": 255,
+ "min_count": 1,
+ "project_name": "merged",
+ "data": [
+  {
+   "description_file": "data/Arabidopsis_thaliana_10.fa.bgz.15.kin.json",
+   "header": {
+    "checksum_script": "17a685dbeeef334e1dcb6e5f38f84715a2c7cec5028454af071451e9a52bcadc",
+    "chromosomes": [
+     [
+      "Chr1 CHROMOSOME dumped from ADB: Jun/20/09 14:53; last updated: 2009-02-02",
+      30427671
+     ],
+    ],
+    "creation_duration": "0:03:07.736857",
+    "creation_speed": 829989,
+    "creation_time_end": "2021-10-16 22:36:27.578499",
+    "creation_time_start": "2021-10-16 22:33:19.841642",
+    "data_size": 1073741824,
+    "file_ver": "KMER001",
+    "flush_every": 500000000,
+    "frag_size": 357914000,
+    "hist": [
+     55881827,
+     954
+    ],
+    "hist_count": 255,
+    "hist_max": 55881827,
+    "hist_min": 2,
+    "hist_sum": 75864811,
+    "hostname": "SAULOACER",
+    "input_file_cheksum": "1f9a12cce0fa57be18ffbec8d46dfe224dd56336638daabc6458417e3b754482",
+    "input_file_ctime": 1634346116.4379272,
+    "input_file_name": "Arabidopsis_thaliana_10.fa.bgz",
+    "input_file_path": "/home/saulo/Programs/kmer-index/data/Arabidopsis_thaliana_10.fa.bgz",
+    "input_file_size": 36390576,
+    "kmer_len": 15,
+    "kmer_size": 1073741824,
+    "max_size": 1073741824,
+    "num_kmers": 119478452,
+    "output_file_cheksum": "4208a6f7e1d6240ea4e2de81d070d2a719d1f74a3c20767da350f8def4f7d497",
+    "output_file_ctime": 1634416582.7479272,
+    "output_file_size": 1073741824,
+    "project_name": "data/Arabidopsis_thaliana_10.fa.bgz",
+    "vals_count": 75864811,
+    "vals_max": 255,
+    "vals_min": 0,
+    "vals_sum": 119184917
+   },
+   "index_file": "data/Arabidopsis_thaliana_10.fa.bgz.15.kin.bgz",
+   "pos": 0
+  }
+ ]
+}
+```
 
 ## Development notes
 
