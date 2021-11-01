@@ -4,6 +4,8 @@
 
 `pip install -r requirements.txt`
 
+`apt-get install xvfb`
+
 ## Run
 
 `225M S_lycopersicum_chromosomes.4.00.fa.gz`
@@ -39,7 +41,6 @@ pypy ./merger.py data/*.15.kin.bgz
 |  X 19  |             |                |      257G  |         |        |       |       |
 |  X 21  |             |                |        4T  |         |        |       |       |
 
-
 ## Merge
 
 ```bash
@@ -57,9 +58,9 @@ comparing data/Solanum_tuberosum_PGSC_DM_v4.03_pseudomolecules.fa.bgz.15.kin.bgz
 saving merged.kma.json
 saving merged.kma
 
-real    333m56.907s
+real    333m56.907s 6h
 user    303m45.443s
-sys     29m45.602s
+sys      29m45.602s
 ```
 
 ## Output
@@ -139,7 +140,7 @@ Where:
 
 `.kma`
 
-Numpy Savez with matrix as `matrix` key.
+Numpy [`Savez`](https://numpy.org/doc/stable/reference/generated/numpy.savez_compressed.html#numpy.savez_compressed) with matrix as `matrix` key.
 
 `.kma.json`
 
@@ -200,6 +201,16 @@ Numpy Savez with matrix as `matrix` key.
  ]
 }
 ```
+
+## Analysis
+
+### Convert
+
+`./calculate_distance.sh merged.kma`
+
+or
+
+`xvfb-run python3 $PWD/calculate_distance.py merged.kma`
 
 ## Development notes
 

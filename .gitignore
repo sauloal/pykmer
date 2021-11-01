@@ -11,6 +11,11 @@
 *.swp
 *.kma
 *.kma.json
+*.npz
+*.png
+*.tree
+*.lsmat
+*.newick
 __pycache__/
 data/
 examples/

@@ -98,6 +98,7 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
         "data"        : data,
     }
 
+    sample_names = []
 
     print(f"saving {outfile}.json")
     with open(outfile+'.json.tmp', "wt") as fhd:
@@ -106,7 +107,7 @@ def merge(project_name: str, indexes: List[str], min_count: int=1, max_count: in
 
     print(f"saving {outfile}")
     with open(outfile+'.tmp', "wb") as fhd:
-        np.savez_compressed(fhd, matrix=matrix)
+        np.savez_compressed(fhd, matrix=matrix, samples=sample_names)
     os.rename(outfile+'.tmp', outfile)
 
     return data, matrix

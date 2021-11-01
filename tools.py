@@ -182,8 +182,7 @@ class Header(HeaderVars):
             return self.index_file_root
 
     @property
-    def index_file_root(self) -> str:
-        return f"{self.input_file_path}.{self.kmer_len:02d}.{self.IND_EXT}"
+    def index_file_root(self) -> str: return f"{self.input_file_path}.{self.kmer_len:02d}.{self.IND_EXT}"
 
     @property
     def index_tmp_file(self) -> str: return f"{self.index_file_root}.{self.TMP}"
