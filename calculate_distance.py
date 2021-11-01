@@ -5,6 +5,7 @@ import sys
 import math
 import json
 
+from typing import Tuple
 from io import StringIO
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def get_matrix(matrix_file: Path) -> np.ndarray:
     print(f"get_matrix :: matrix.shape", matrix.shape)
     return matrix
 
-def calc_distance(matrix: np.ndarray, fill_diagonal: bool=True) -> np.ndarray:
+def calc_distance(matrix_file: Path, matrix: np.ndarray, fill_diagonal: bool=True) -> Tuple[Path,np.ndarray]:
     print(f"calc_distance :: matrix.shape", matrix.shape)
     # matrix = matrix[:3,:3,:]
     
@@ -86,9 +87,14 @@ def calc_distance(matrix: np.ndarray, fill_diagonal: bool=True) -> np.ndarray:
     # print("calc_distance :: dist  ", dist  , dist  .shape, dist.dtype)
     print("calc_distance :: dist  ", dist  .shape, dist.dtype)
 
-    return dist
+    basefile    = Path(f"{matrix_file}.dist.jaccard")
+    matrix_file = Path(f"{basefile}.npz")
+    with matrix_file.open(mode="wb") as fhd:
+        np.savez(fhd, distance=dist)
 
-def cluster_distance(matrix_file: Path, distance: np.ndarray, use_ete: bool=True) -> np.ndarray:
+    return basefile, dist
+
+def cluster_distance(matrix_file: Path, basefile: Path, distance: np.ndarray) -> np.ndarray:
     # http://scikit-bio.org/docs/0.2.1/generated/skbio.tree.nj.html
     # http://scikit-bio.org/docs/0.2.1/generated/skbio.tree.TreeNode.html?highlight=treenode
     # http://scikit-bio.org/docs/0.2.1/generated/generated/skbio.stats.distance.DistanceMatrix.html?highlight=distancematrix
@@ -126,26 +132,26 @@ def cluster_distance(matrix_file: Path, distance: np.ndarray, use_ete: bool=True
     # print("cluster_distance :: tree.ascii_art",tree.ascii_art())
     # print("cluster_distance :: tree.to_taxonomy",tree.to_taxonomy())
     
-    newick_file = Path(f"{matrix_file}.newick")
+    newick_file = Path(f"{basefile}.newick")
     with newick_file.open("wt") as fhd:
         fhd.write(newick_tree)
 
-    dm_file = Path(f"{matrix_file}.lsmat")
+    dm_file = Path(f"{basefile}.lsmat")
     with dm_file.open("wt") as fhd:
         dm.write(fhd, format='lsmat')
 
-    dmr_file = Path(f"{matrix_file}.npz")
+    dmr_file = Path(f"{basefile}.mat.npz")
     with dmr_file.open("wb") as fhd:
         np.savez(dmr_file, redundant_matrix=dmr)
 
     ete_tree = Tree(newick_tree)
 
-    tree_file = Path(f"{matrix_file}.tree")
+    tree_file = Path(f"{basefile}.tree")
     with tree_file.open("wt") as fhd:
         fhd.write(str(ete_tree))
 
 
-    png_file  = f"{matrix_file}.png"
+    png_file  = f"{basefile}.png"
     font_size = 12
     height    = font_size*4*(num_samples+5)
     width     = height // 2
@@ -168,14 +174,10 @@ def cluster_distance(matrix_file: Path, distance: np.ndarray, use_ete: bool=True
 
     ete_tree.render(png_file, h=height, w=width, dpi=72, units="px", tree_style=tree_style)
 
-def save_matrix(matrix: np.ndarray) -> None:
-    pass
-
 def load(matrix_file: Path):
-    matrix   = get_matrix(matrix_file)
-    distance = calc_distance(matrix, fill_diagonal=True)
-    cluster  = cluster_distance(matrix_file, distance)
-    save_matrix(distance)
+    matrix             = get_matrix(matrix_file)
+    basefile, distance = calc_distance(matrix_file, matrix, fill_diagonal=True)
+    cluster            = cluster_distance(matrix_file, basefile, distance)
 
 def main():
     matrix_file = Path(sys.argv[1])
