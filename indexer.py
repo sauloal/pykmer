@@ -298,6 +298,7 @@ def process_kmers(
 
 def create_fasta_index(
         project_name : str,
+        sample_name  : str,
         input_file   : str,
         kmer_len     : int,
         overwrite    : bool,
@@ -309,6 +310,7 @@ def create_fasta_index(
 
     header = Header(
         project_name,
+        sample_name   = sample_name,
         input_file    = input_file,
         kmer_len      = kmer_len,
         flush_every   = flush_every,
@@ -317,7 +319,7 @@ def create_fasta_index(
         buffer_size   = buffer_size
     )
 
-    print(f"project_name {header.project_name} kmer_len {header.kmer_len:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d} bytes {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
+    print(f"project_name {header.project_name} sample_name {header.sample_name} kmer_len {header.kmer_len:15,d} kmer_size {header.kmer_size:15,d} max_size {header.max_size:15,d} bytes {header.max_size//1024:15,d} Kb {header.max_size//1024//1024:15,d} Mb {header.max_size//1024//1024//1024:15,d} Gb")
     # print(header)
 
     print("default buffer size", buffer_size)
@@ -460,12 +462,12 @@ def run_test(overwrite: bool=False):
     for kmer_len in kmer_lens:
         print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
         input_file = f"{project_name}-{kmer_len:02d}.fasta.gz"
-        # input_file = None # None for stdin
+        sample_name = input_file
 
         index_file = f"{project_name}-{kmer_len:02d}.fasta.gz.{kmer_len:02d}.bin"
 
         print(f"project_name {project_name} kmer_len {kmer_len:15,d}")
-        create_fasta_index(project_name, input_file, index_file, kmer_len, overwrite=overwrite)
+        create_fasta_index(project_name, sample_name, input_file, index_file, kmer_len, overwrite=overwrite)
         # read_fasta_index(project_name, index_file)
 
         print()
@@ -476,16 +478,17 @@ def main() -> None:
 
     else:
         input_file      =     sys.argv[1]
-        kmer_len        = int(sys.argv[2])
+        sample_name     =     sys.argv[2]
+        kmer_len        = int(sys.argv[3])
 
         project_name    = input_file
 
         buffer_size     = 2**16
         # buffer_size = io.DEFAULT_BUFFER_SIZE
 
-        print(f"project_name {project_name:s} input_file {input_file:s} kmer_len {kmer_len:15,d}")
+        print(f"project_name {project_name:s} input_file {input_file:s} sample_name {sample_name:s} kmer_len {kmer_len:15,d}")
 
-        create_fasta_index(project_name, input_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
+        create_fasta_index(project_name, sample_name, input_file, kmer_len, buffer_size=buffer_size, overwrite=True, debug=False)
 
         # read_fasta_index(project_name, input_file=input_file, kmer_len=kmer_len)
 

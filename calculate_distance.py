@@ -113,7 +113,8 @@ def cluster_distance(matrix_file: Path, basefile: Path, distance: np.ndarray) ->
 
     project_name = header["project_name"]
     num_samples  = len(header["data"])
-    ids          = [d["header"]["input_file_name"] for d in header["data"]]
+    # ids          = [d["header"]["input_file_name"] for d in header["data"]]
+    ids          = [d["header"]["input_file_name"] if d["header"]["file_ver"] == "KMER001" else d["header"]["sample_name"] for d in header["data"]]
 
     assert num_samples == distance.shape[0]
     dm   = DistanceMatrix(distance, ids)

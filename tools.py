@@ -73,7 +73,7 @@ class HeaderVars:
     # HEADER_LEN      : int       = len(HEADER_VER) + HEADER_VAL_SIZE
     HEADER_FIXED    : List[str] = ["file_ver", "kmer_size", "data_size", "max_size"]
     HEADER_DATA     : List[str] = [
-        "project_name"       ,
+        "project_name"       , "sample_name"      ,
         "kmer_len"           ,
         "flush_every"        ,
         "frag_size"          ,
@@ -102,6 +102,7 @@ class HeaderVars:
 class Header(HeaderVars):
     def __init__(self,
             project_name   : str,
+            sample_name    : str,
             input_file     : Union[str, None] = None,
             kmer_len       : Union[int, None] = None,
             index_file     : Union[str, None] = None,
@@ -112,6 +113,7 @@ class Header(HeaderVars):
             buffer_size    : int = HeaderVars.DEFAULT_BUFFER_SIZE,
     ):
         self.project_name          :str         = project_name
+        self.sample_name           :str         = sample_name
         self.input_file_name       :str         = os.path.basename(input_file) if input_file else input_file
         self.input_file_path       :str         = os.path.abspath( input_file) if input_file else input_file
         self.kmer_len              :int         = kmer_len
