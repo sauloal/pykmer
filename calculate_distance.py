@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 
-import os
 import sys
-import math
 import json
 
-from typing import Tuple
-from io import StringIO
+from typing import Iterable, Tuple, Dict, List
 from pathlib import Path
 
 import numpy as np
 
-import skbio
 from skbio import DistanceMatrix
 from skbio.tree import nj
-from skbio.tree import TreeNode
+
 from ete3 import Tree, TreeStyle, TextFace
 
 #//Jaccard Index
 #//                shared AB
 #//  -------------------------------------
 #//  exclusive A + shared AB + exclusive B
+
+def read_names_file(names_file: Path) -> Dict[str, str]:
+    assert names_file.exists()
+    with names_file.open(mode="rt") as fhd:
+        rows: List[str]           = fhd.readlines()
+        cols: Iterable[List[str]] = (r.split("\t") for r in rows)
+        names = {c[0].strip(): c[1].strip() for c in cols if len(c) == 2}
+    return names
 
 def get_matrix(matrix_file: Path) -> np.ndarray:
     assert matrix_file.exists()
@@ -94,7 +98,20 @@ def calc_distance(matrix_file: Path, matrix: np.ndarray, fill_diagonal: bool=Tru
 
     return basefile, dist
 
-def cluster_distance(matrix_file: Path, basefile: Path, distance: np.ndarray) -> np.ndarray:
+def cluster_distance(
+        matrix_file              : Path      ,
+        basefile                 : Path      ,
+        distance                 : np.ndarray,
+        names_file               : Path=None ,
+        load_header              : bool=True ,
+        save_matrix_redundant_tsv: bool=True ,
+        save_matrix_redundant_np : bool=True ,
+        save_matrix_condensed_tsv: bool=True ,
+        save_matrix_condensed_np : bool=True ,
+        save_tree_newick         : bool=True ,
+        save_tree_ascii          : bool=True ,
+        save_tree_png            : bool=True ,
+    ) -> np.ndarray:
     # http://scikit-bio.org/docs/0.2.1/generated/skbio.tree.nj.html
     # http://scikit-bio.org/docs/0.2.1/generated/skbio.tree.TreeNode.html?highlight=treenode
     # http://scikit-bio.org/docs/0.2.1/generated/generated/skbio.stats.distance.DistanceMatrix.html?highlight=distancematrix
@@ -107,78 +124,115 @@ def cluster_distance(matrix_file: Path, basefile: Path, distance: np.ndarray) ->
     #         [8,  9,  7,  3,  0]]
     # ids = list('abcde')
 
-    header_file = Path(f"{matrix_file}.json")
-    with header_file.open(mode="rt") as fhd:
-        header = json.load(fhd)
+    if load_header:
+        header_file = Path(f"{matrix_file}.json")
+        with header_file.open(mode="rt") as fhd:
+            header = json.load(fhd)
 
-    project_name = header["project_name"]
-    num_samples  = len(header["data"])
-    # ids          = [d["header"]["input_file_name"] for d in header["data"]]
-    ids          = [d["header"]["input_file_name"] for d in header["data"]]
+        project_name   = header["project_name"]
+        num_samples    = len(header["data"])
+        ids: List[str] = [d["header"]["input_file_name"] for d in header["data"]]
 
-    assert num_samples == distance.shape[0]
+        assert num_samples == distance.shape[0]
+    
+    else:
+        project_name   = matrix_file
+        ids: List[str] = [str(d+1) for d in range(distance.shape[0])]
+
+    if names_file:
+        names = read_names_file(names_file)
+        ids   = [names.get(i, i) for i in ids]
+
+
     dm   = DistanceMatrix(distance, ids)
     # print(dm, type(dm))
     # newick_tree, tree = nj(dm, result_constructor=lambda x: (x, TreeNode.read(StringIO(x), format='newick')))
-    newick_tree:str = nj(dm, result_constructor=str)
-    # tree: TreeNode = nj(dm)
-    # dmc: np.ndarray = dm.condensed_form()
+
+
     dmr: np.ndarray = dm.redundant_form()
-    # treea = tree.to_array()
-    # print(dmc)
-    # print(dmr)
-    # print(treea, type(treea))
+    if save_matrix_redundant_np or save_matrix_redundant_tsv:
+        if save_matrix_redundant_np:
+            dmr_file = Path(f"{basefile}.mat.redundant.np")
+            with dmr_file.open("wb") as fhd:
+                np.save(fhd, dmr, allow_pickle=False)
 
-    # print("cluster_distance :: tree",tree, type(tree))
-    # print("cluster_distance :: tree.ascii_art",tree.ascii_art())
-    # print("cluster_distance :: tree.to_taxonomy",tree.to_taxonomy())
-    
-    newick_file = Path(f"{basefile}.newick")
-    with newick_file.open("wt") as fhd:
-        fhd.write(newick_tree)
-
-    dm_file = Path(f"{basefile}.lsmat")
-    with dm_file.open("wt") as fhd:
-        dm.write(fhd, format='lsmat')
-
-    dmr_file = Path(f"{basefile}.mat.npz")
-    with dmr_file.open("wb") as fhd:
-        np.savez(dmr_file, redundant_matrix=dmr)
-
-    ete_tree = Tree(newick_tree)
-
-    tree_file = Path(f"{basefile}.tree")
-    with tree_file.open("wt") as fhd:
-        fhd.write(str(ete_tree))
+        if save_matrix_redundant_tsv:
+            dmr_file = Path(f"{basefile}.mat.redundant.lsmat")
+            with dmr_file.open("wt") as fhd:
+                dm.write(fhd, format='lsmat')
 
 
-    png_file  = f"{basefile}.png"
-    font_size = 12
-    height    = font_size*4*(num_samples+5)
-    width     = height // 2
-    
-    circular_style = TreeStyle()
-    circular_style.mode = "c" # draw tree in circular mode
-    circular_style.scale = 20
+    if save_matrix_condensed_np or save_matrix_condensed_tsv:
+        dmc: np.ndarray = dm.condensed_form()
+        if save_matrix_condensed_np:
+            dmc_file = Path(f"{basefile}.mat.condensed.np")
+            with dmc_file.open("wb") as fhd:
+                np.save(fhd, dmc, allow_pickle=False)
 
-    leafy_style = TreeStyle()
-    # leafy_style.show_branch_length = True
-    # leafy_style.show_branch_support = True
+        if save_matrix_condensed_tsv:
+            dmc_file = Path(f"{basefile}.mat.condensed.txt")
+            with dmc_file.open("wt") as fhd:
+                np.savetxt(fhd, dmc)
 
-    scale_style = TreeStyle()
-    # scale_style.scale =  120 # 120 pixels per branch length unit
 
-    tree_style = leafy_style
-    tree_style.scale = 60
-    tree_style.show_leaf_name = True
-    tree_style.title.add_face(TextFace(project_name, fsize=20), column=0)
+    if save_tree_newick or save_tree_ascii or save_tree_png:
+        newick_tree:str = nj(dm, result_constructor=str)
+        # tree: TreeNode = nj(dm)
 
-    ete_tree.render(png_file, h=height, w=width, dpi=72, units="px", tree_style=tree_style)
+        # treea = tree.to_array()
+        # print(dmc)
+        # print(dmr)
+        # print(treea, type(treea))
 
-def load(matrix_file: Path):
+        # print("cluster_distance :: tree",tree, type(tree))
+        # print("cluster_distance :: tree.ascii_art",tree.ascii_art())
+        # print("cluster_distance :: tree.to_taxonomy",tree.to_taxonomy())
+        
+        if save_tree_newick:
+            newick_file = Path(f"{basefile}.newick")
+            with newick_file.open("wt") as fhd:
+                fhd.write(newick_tree)
+
+        if save_tree_ascii or save_tree_png:
+            ete_tree = Tree(newick_tree)
+
+            if save_tree_ascii:
+                tree_file = Path(f"{basefile}.tree")
+                with tree_file.open("wt") as fhd:
+                    fhd.write(str(ete_tree))
+
+            if save_tree_png:
+                png_file  = f"{basefile}.png"
+                font_size = 12
+                height    = font_size*4*(num_samples+5)
+                width     = height // 2
+                
+                circular_style            = TreeStyle()
+                circular_style.mode       = "c" # draw tree in circular mode
+                circular_style.scale      = 20
+                # leafy_style.show_branch_length = True
+                # leafy_style.show_branch_support = True
+
+                leafy_style               = TreeStyle()
+
+                tree_style                = leafy_style
+                tree_style.scale          = 60
+                tree_style.show_leaf_name = True
+                tree_style.title.add_face(TextFace(project_name, fsize=20), column=0)
+
+                ete_tree.render(png_file, h=height, w=width, dpi=72, units="px", tree_style=tree_style)
+
+    return dmr
+
+def load(matrix_file: Path, names_file: Path=None):
+    if names_file is None:
+        names_file_t = Path(f"{matrix_file}.names.tsv")
+        if names_file_t.exists():
+            names_file = names_file_t
+
     matrix             = get_matrix(matrix_file)
     basefile, distance = calc_distance(matrix_file, matrix, fill_diagonal=True)
-    cluster            = cluster_distance(matrix_file, basefile, distance)
+    redundant_matrix   = cluster_distance(matrix_file, basefile, distance, names_file=names_file)
 
 def main():
     matrix_file = Path(sys.argv[1])

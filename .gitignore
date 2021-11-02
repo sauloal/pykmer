@@ -16,6 +16,8 @@
 *.tree
 *.lsmat
 *.newick
+*.np
+*.txt
 __pycache__/
 data/
 examples/
