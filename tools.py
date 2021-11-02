@@ -87,6 +87,9 @@ class HeaderVars:
         "hist_sum"           , "hist_count"       , "hist_min"         , "hist_max",
         "vals_sum"           , "vals_count"       , "vals_min"         , "vals_max"
     ]
+    NOT_LEAN       : List[str] = [
+        "chromosomes"
+    ]
 
     IND_EXT  :str = 'kin'
     DESC_EXT :str = 'json'
@@ -498,9 +501,10 @@ class Header(HeaderVars):
         return s_count, o_count, c_count
 
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, lean=False) -> Dict[str, Any]:
         data = OrderedDict()
         for k in self.HEADER_FIXED + self.HEADER_DATA:
+            if k in self.NOT_LEAN: continue
             v = getattr(self, k)
             data[k] = v
         return data

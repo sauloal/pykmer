@@ -129,7 +129,8 @@ Where:
 
 - `chromosomes` are the chromosomes and their lengths.
 
-- `hist` are the number of kmers with the coverate equal to the position in the `array + 1`. `array[0] = 100` means 100 kmers have coverage of `1`.
+- `hist` are the number of kmers with the coverate equal to the position in
+the `array + 1`. `array[0] = 100` means 100 kmers have coverage of `1`.
 
 - Maximum coverage is `255` with 1 byte per k-mer
 
@@ -140,7 +141,8 @@ Where:
 
 `.kma`
 
-Numpy [`Savez`](https://numpy.org/doc/stable/reference/generated/numpy.savez_compressed.html#numpy.savez_compressed) with matrix as `matrix` key.
+Numpy [`Savez`](https://numpy.org/doc/stable/reference/generated/numpy.savez_compressed.html#numpy.savez_compressed)
+with matrix as `matrix` key.
 
 `.kma.json`
 
@@ -257,6 +259,16 @@ bgzip -i -I $F.bgz.gzi -l 9 -c $F > $F.bgz
 
 ```
 
+## TODO
+
+- ~~<https://numpy.org/doc/stable/reference/generated/numpy.memmap.html>~~
+- ~~block compress~~
+- ~~json header~~
+- ~~merge databases~~
+- ~~create matrix~~
+- multithread per chromosome
+- multithread merge
+
 ### ~~Pipe~~
 
 ```bash
@@ -269,12 +281,3 @@ pypy K=15
 pygzip  PIPE        pygz        STDIN       Popen
 real    56m11.378s  33m48.443s  35m50.502s  66m 5.744s
 ```
-
-## TODO
-
-- ~~<https://numpy.org/doc/stable/reference/generated/numpy.memmap.html>~~
-- ~~block compress~~
-- ~~json header~~
-- multithread per chromosome
-- merge databases
-- create matrix

@@ -18,6 +18,7 @@
 *.newick
 *.np
 *.txt
+*.tsv
 __pycache__/
 data/
 examples/
