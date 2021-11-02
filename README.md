@@ -212,6 +212,22 @@ or
 
 `xvfb-run python3 $PWD/calculate_distance.py merged.kma`
 
+### Cluster Output
+
+| Filename                                    | Description                   |
+|---------------------------------------------|-------------------------------|
+| merged.kma                                  | Input Matrix file             |
+| merged.kma.json                             | Input Matrix Header           |
+| merged.kma.names.tsv                        | [Optional] Input Sample names |
+| merged.kma.dist.jaccard.mat.condensed.np    | Condensed matrix np           |
+| merged.kma.dist.jaccard.mat.condensed.txt   | Condensed matrix tsv          |
+| merged.kma.dist.jaccard.mat.redundant.lsmat | Redundant matrix tsv          |
+| merged.kma.dist.jaccard.mat.redundant.np    | Redundant matrix np           |
+| merged.kma.dist.jaccard.npz                 | Distance matrix npz           |
+| merged.kma.dist.jaccard.newick              | Tree - Newick                 |
+| merged.kma.dist.jaccard.png                 | Tree - PNG                    |
+| merged.kma.dist.jaccard.tree                | Tree - ASCII Art              |
+
 ## Development notes
 
 ### Profiling
