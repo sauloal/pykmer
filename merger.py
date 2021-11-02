@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import argparse
 
 import pathlib
@@ -51,6 +52,25 @@ parser.add_argument('--max-count'  ,              type=int , default=DEFAULT_MAX
 parser.add_argument('--buffer-size',              type=int , default=DEFAULT_BUFFER_SIZE, nargs='?', help=f'Buffer size [{DEFAULT_BUFFER_SIZE}]')
 parser.add_argument('--block-size' ,              type=int , default=DEFAULT_BLOCK_SIZE,  nargs='?', help=f'Block size [{DEFAULT_BLOCK_SIZE}]')
 
+from multiprocessing import Pool, TimeoutError
+
+def calculate_distance(
+        k_index_file: str,
+        l_index_file: str,
+        min_count   : int=DEFAULT_MIN_COUNT,
+        max_count   : int=DEFAULT_MAX_COUNT,
+        buffer_size : int=DEFAULT_BUFFER_SIZE,
+        block_size  : int=DEFAULT_BLOCK_SIZE
+    ) -> Tuple[int,int,int]:
+    k_index_file = str(k_index_file)
+    l_index_file = str(l_index_file)
+    
+    k_header     = Header(k_index_file, index_file=k_index_file, buffer_size=buffer_size)
+    l_header     = Header(l_index_file, index_file=l_index_file, buffer_size=buffer_size)
+
+    k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
+
+    return k_count, l_count, s_count
 
 def merge(
         project_name: str,
@@ -108,26 +128,46 @@ def merge(
 
     matrix:ResultType = [None] * len(data)
     matrix            = np.ndarray(shape=(len(data),len(data),3), dtype=np.uint64)
+    pool = Pool(processes=4)
+    tasks = {}
     for k in range(len(data)-1):
         k_data:Metadata = data[k]
-        k_header:Header = k_data["header"]
+        # k_header:Header = k_data["header"]
         
         print("comparing", k_data["index_file"])
-        # matrix[k] = [None] * len(data)
         for l in range(k+1, len(data)):
             l_data:Metadata = data[l]
 
             print(" versus", l_data["index_file"])
             sys.stdout.flush()
             
-            l_header:Header = l_data["header"]
-            # k_header.calculate_distance(l_header)
-            k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
+            # l_header:Header = l_data["header"]
+
+            task = pool.apply_async(calculate_distance, (k_data["index_file"], l_data["index_file"]), {"buffer_size": buffer_size, "min_count": min_count, "max_count": max_count, "block_size": block_size})
+            tasks[(k,l)] = [True, task]
+
+            # k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
             
-            print(f"   matrix Total #1 {k_count:15,d} Total #2 {l_count:15,d} Shared {s_count:15,d}")
-            # matrix[k][l] = (k_count, l_count, s_count)
-            matrix[k,l,:] = (k_count, l_count, s_count)
-            matrix[l,k,:] = (l_count, k_count, s_count)
+            # print(f"   matrix Total #1 {k_count:15,d} Total #2 {l_count:15,d} Shared {s_count:15,d}")
+            # matrix[k,l,:] = (k_count, l_count, s_count)
+            # matrix[l,k,:] = (l_count, k_count, s_count)
+
+    while len(tasks) > 0:
+        print(f"waiting for {len(tasks)} tasks")
+        for key, (running, task) in tasks.items():
+            (k,l) = key
+            if running:
+                try:
+                    k_count, l_count, s_count = task.get(timeout=1)
+                except TimeoutError:
+                    continue
+                print(f"   matrix Total #{k:3d} {k_count:15,d} Total #{l:3d} {l_count:15,d} Shared {s_count:15,d}")
+                matrix[k,l,:] = (k_count, l_count, s_count)
+                matrix[l,k,:] = (l_count, k_count, s_count)
+                tasks[key][0] = False
+        tasks = {k:v for k,v in tasks.items() if v[0]}
+        time.sleep(10)
+
 
     for k,v in data.items():
         v["header"] = v["header"].to_dict(lean=True)
