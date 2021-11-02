@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple, NewType
 import numpy as np
 
 import json
-from json import JSONEncoder
+from   json import JSONEncoder
 
 def _default(self, obj):
     if hasattr(obj.__class__, "to_dict"):
@@ -21,11 +21,11 @@ def _default(self, obj):
     elif isinstance(obj, (pathlib.Path, pathlib.PosixPath, pathlib.PurePath, pathlib.PurePosixPath, pathlib.PureWindowsPath, pathlib.WindowsPath)):
         return str(obj)
 
-_default.default = JSONEncoder().default
+_default.default    = JSONEncoder().default
 JSONEncoder.default = _default
 
 
-from tools import Timer, Header, Metadata
+from tools import Header, Metadata
 
 ResultType = NewType('ResultType', Dict[Tuple[int,int],Tuple[int,int,int]])
 DataType   = NewType('DataType'  , List[Metadata])
@@ -37,10 +37,10 @@ EXTS = (
     '.kma.'+Header.COMP_EXT
 )
 
-DEFAULT_MIN_COUNT   =   1
-DEFAULT_MAX_COUNT   = 255
+DEFAULT_MIN_COUNT   = Header.DEFAULT_MIN_COUNT
+DEFAULT_MAX_COUNT   = Header.DEFAULT_MAX_COUNT
 DEFAULT_BUFFER_SIZE = Header.DEFAULT_BUFFER_SIZE
-DEFAULT_BLOCK_SIZE  = 100_000_000
+DEFAULT_BLOCK_SIZE  = Header.DEFAULT_BLOCK_SIZE
 
 parser = argparse.ArgumentParser(description='Merge kmer databases.')
 parser.add_argument('Project_Name' , metavar='P', type=str ,                                         help='Project name')
@@ -99,7 +99,7 @@ def merge(
             "pos"             : k,
             "index_file"      : kin,
             "description_file": desc,
-            "header"          : header.to_dict(lean=True)
+            "header"          : header
         }
 
     print()
@@ -129,6 +129,8 @@ def merge(
             matrix[k,l,:] = (k_count, l_count, s_count)
             matrix[l,k,:] = (l_count, k_count, s_count)
 
+    for k,v in data.items():
+        v["header"] = v["header"].to_dict(lean=True)
 
     output = {
         "project_name": project_name,

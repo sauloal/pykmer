@@ -101,6 +101,11 @@ class HeaderVars:
     DEFAULT_MAX_FRAG_SIZE :int = 1_000_000_000
     DEFAULT_BUFFER_SIZE   :int = io.DEFAULT_BUFFER_SIZE
 
+    DEFAULT_MIN_COUNT   =   1
+    DEFAULT_MAX_COUNT   = 255
+    DEFAULT_BLOCK_SIZE  = 100_000_000
+
+
 
 class Header(HeaderVars):
     def __init__(self,
@@ -428,7 +433,7 @@ class Header(HeaderVars):
         self.check_data_file(self.index_tmp_file)
 
 
-    def calculate_distance(self, other: "Header", min_count: int=1, max_count: int=255, blk_size: int=100_000_000):
+    def calculate_distance(self, other: "Header", min_count: int=HeaderVars.DEFAULT_MIN_COUNT, max_count: int=HeaderVars.DEFAULT_MAX_COUNT, block_size: int=HeaderVars.DEFAULT_BLOCK_SIZE):
         s_count = 0
         o_count = 0
         c_count = 0
@@ -437,13 +442,13 @@ class Header(HeaderVars):
 
         for s_fhd in self.open_index_file():
             for o_fhd in other.open_index_file():
-                for blk_num, blk_start in enumerate(range(0,self.data_size,blk_size)):                    
-                    blk_end      = blk_start + blk_size
-                    blk_size_eff = blk_size
+                for blk_num, blk_start in enumerate(range(0,self.data_size,block_size)):                    
+                    blk_end        = blk_start + block_size
+                    block_size_eff = block_size
                     if blk_end > self.data_size:
-                        blk_end      = self.data_size - blk_start
-                        blk_size_eff = self.data_size - blk_start
-                    blk_sum += blk_size_eff
+                        blk_end        = self.data_size - blk_start
+                        block_size_eff = self.data_size - blk_start
+                    blk_sum += block_size_eff
                     # print(blk_start, blk_end)
 
                     sys.stdout.write(f" {blk_num+1:15,d} {blk_start+1:15,d}/{self.data_size:15,d} ({(blk_start+1)/self.data_size*100.0:6.2f}%)")
@@ -452,8 +457,8 @@ class Header(HeaderVars):
                     if ((blk_num + 1) % 3) == 0:
                         print()
 
-                    s_blk = np.frombuffer(s_fhd.read(blk_size_eff), dtype=np.uint8, count=blk_size_eff)
-                    o_blk = np.frombuffer(o_fhd.read(blk_size_eff), dtype=np.uint8, count=blk_size_eff)
+                    s_blk = np.frombuffer(s_fhd.read(block_size_eff), dtype=np.uint8, count=block_size_eff)
+                    o_blk = np.frombuffer(o_fhd.read(block_size_eff), dtype=np.uint8, count=block_size_eff)
                     assert s_blk.shape == o_blk.shape, f"s_blk.shape {s_blk.shape} == {o_blk.shape} o_blk.shape"
                     # print(s_blk)
                     # print(o_blk)
@@ -480,8 +485,7 @@ class Header(HeaderVars):
         assert blk_sum == self.data_size
         return s_count, o_count, c_count
 
-
-    def calculate_distance2(self, other: "Header", min_count: int=1, max_count: int=255):
+    def calculate_distance2(self, other: "Header", min_count: int=HeaderVars.DEFAULT_MIN_COUNT, max_count: int=HeaderVars.DEFAULT_MAX_COUNT):
         s_count = 0
         o_count = 0
         c_count = 0
@@ -504,7 +508,7 @@ class Header(HeaderVars):
     def to_dict(self, lean=False) -> Dict[str, Any]:
         data = OrderedDict()
         for k in self.HEADER_FIXED + self.HEADER_DATA:
-            if k in self.NOT_LEAN: continue
+            if lean and k in self.NOT_LEAN: continue
             v = getattr(self, k)
             data[k] = v
         return data

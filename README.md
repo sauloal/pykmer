@@ -45,6 +45,10 @@ pypy ./merger.py data/*.15.kin.bgz
 
 ```bash
 time pypy ./merger.py merged data/*.15.kin.bgz
+# merged.001-255.kma
+
+time pypy ./merger.py merged data/*.15.kin.bgz --max-count=50
+# merged.001-050.kma
 ```
 
 ```text
