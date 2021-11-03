@@ -80,8 +80,18 @@ def calc_distance(matrix_file: Path, matrix: np.ndarray, fill_diagonal: bool=Tru
     # print("res   ", res   , res   .shape, res.dtype)
 
     shared:np.ndarray = matrix[:,:,2].astype(np.float64)
-    total :np.ndarray = matrix.sum(axis=2).astype(np.float64)
-    dist  :np.ndarray = 1.0 - (shared / total)
+    total :np.ndarray = matrix[:,:,0:2].sum(axis=2).astype(np.float64)
+    dist  :np.ndarray = 1.0 - (shared / (total-shared))
+    # Note
+    #   Jaccard sharedAB / (exclusiveA + exclusiveB + sharedAB)
+    # can alse be written as
+    #           sharedAB / (totalA + totalB - sharedAB)
+    # with totalA = exclusiveA + sharedAB
+    #      totalB = exclusiveB + sharedAB
+    # therefore
+    #      totalA + totalB - sharedAB
+    #   =  exclusiveA + sharedAB + exclusiveB + sharedAB - sharedAB
+    #   =  exclusiveA + sharedAB + exclusiveB
 
     if fill_diagonal:
         np.fill_diagonal(dist, 0.0)

@@ -1,5 +1,11 @@
 # kmer-index
 
+AKA [Cnidaria](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4630969/) V2.
+
+Different from Cnidaria, we don't filter for valid kmers (kmers shared by at
+least 2 samples) as this would seriously hurt parallelization and independence
+of the datasets.
+
 ## Install
 
 `pip install -r requirements.txt`
