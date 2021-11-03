@@ -16,6 +16,10 @@ import numpy as np
 import json
 from   json import JSONEncoder
 
+from multiprocessing.pool import AsyncResult
+from multiprocessing import Pool, TimeoutError
+
+
 def _default(self, obj):
     if hasattr(obj.__class__, "to_dict"):
         return getattr(obj.__class__, "to_dict", _default.default)(obj)
@@ -42,17 +46,18 @@ DEFAULT_MIN_COUNT   = Header.DEFAULT_MIN_COUNT
 DEFAULT_MAX_COUNT   = Header.DEFAULT_MAX_COUNT
 DEFAULT_BUFFER_SIZE = Header.DEFAULT_BUFFER_SIZE
 DEFAULT_BLOCK_SIZE  = Header.DEFAULT_BLOCK_SIZE
+DEFAULT_THREADS     = 4
 
 parser = argparse.ArgumentParser(description='Merge kmer databases.')
 parser.add_argument('Project_Name' , metavar='P', type=str ,                                         help='Project name')
 parser.add_argument('Kmer_1'       , metavar='K', type=Path,                              nargs=1  , help='List of kin files')
 parser.add_argument('Kmer_N'       , metavar='K', type=Path,                              nargs='+', help='List of kin files')
-parser.add_argument('--min-count'  ,              type=int , default=DEFAULT_MIN_COUNT,   nargs='?', help=f'Minimum Kmer Count [{DEFAULT_MIN_COUNT}]')
-parser.add_argument('--max-count'  ,              type=int , default=DEFAULT_MAX_COUNT,   nargs='?', help=f'Maximum Kmer Count [{DEFAULT_MAX_COUNT}]')
+parser.add_argument('--min-count'  ,              type=int , default=DEFAULT_MIN_COUNT  , nargs='?', help=f'Minimum Kmer Count [{DEFAULT_MIN_COUNT}]')
+parser.add_argument('--max-count'  ,              type=int , default=DEFAULT_MAX_COUNT  , nargs='?', help=f'Maximum Kmer Count [{DEFAULT_MAX_COUNT}]')
 parser.add_argument('--buffer-size',              type=int , default=DEFAULT_BUFFER_SIZE, nargs='?', help=f'Buffer size [{DEFAULT_BUFFER_SIZE}]')
-parser.add_argument('--block-size' ,              type=int , default=DEFAULT_BLOCK_SIZE,  nargs='?', help=f'Block size [{DEFAULT_BLOCK_SIZE}]')
+parser.add_argument('--block-size' ,              type=int , default=DEFAULT_BLOCK_SIZE , nargs='?', help=f'Block size [{DEFAULT_BLOCK_SIZE}]')
+parser.add_argument('--threads'    ,              type=int , default=DEFAULT_THREADS    , nargs='?', help=f'Threads [{DEFAULT_THREADS}]')
 
-from multiprocessing import Pool, TimeoutError
 
 def calculate_distance(
         k_index_file: str,
@@ -68,7 +73,7 @@ def calculate_distance(
     k_header     = Header(k_index_file, index_file=k_index_file, buffer_size=buffer_size)
     l_header     = Header(l_index_file, index_file=l_index_file, buffer_size=buffer_size)
 
-    k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
+    k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size, threading=True)
 
     return k_count, l_count, s_count
 
@@ -78,7 +83,8 @@ def merge(
         min_count   : int=DEFAULT_MIN_COUNT,
         max_count   : int=DEFAULT_MAX_COUNT,
         buffer_size : int=DEFAULT_BUFFER_SIZE,
-        block_size  : int=DEFAULT_BLOCK_SIZE
+        block_size  : int=DEFAULT_BLOCK_SIZE,
+        threads     : int=DEFAULT_THREADS
     ) -> Tuple[DataType, ResultType]:
 
     assert min_count    >=   1 
@@ -128,48 +134,57 @@ def merge(
 
     matrix:ResultType = [None] * len(data)
     matrix            = np.ndarray(shape=(len(data),len(data),3), dtype=np.uint64)
-    pool = Pool(processes=4)
-    tasks = {}
-    for k in range(len(data)-1):
-        k_data:Metadata = data[k]
-        # k_header:Header = k_data["header"]
-        
-        print("comparing", k_data["index_file"])
-        for l in range(k+1, len(data)):
-            l_data:Metadata = data[l]
+    with Pool(processes=threads) as pool:
+        tasks: Dict[Tuple[int,int], Tuple[bool,AsyncResult]] = {}
+        for k in range(len(data)-1):
+            k_data:Metadata = data[k]
+            # k_header:Header = k_data["header"]
+            
+            print("comparing", k_data["index_file"])
+            for l in range(k+1, len(data)):
+                l_data:Metadata = data[l]
 
-            print(" versus", l_data["index_file"])
+                print(" versus", l_data["index_file"])
+                sys.stdout.flush()
+
+                # l_header:Header = l_data["header"]
+
+                task = pool.apply_async(calculate_distance, (k_data["index_file"], l_data["index_file"]), {"buffer_size": buffer_size, "min_count": min_count, "max_count": max_count, "block_size": block_size})
+                tasks[(k,l)] = [True, task]
+
+                # k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
+
+                # print(f"   matrix Total #1 {k_count:15,d} Total #2 {l_count:15,d} Shared {s_count:15,d}")
+                # matrix[k,l,:] = (k_count, l_count, s_count)
+                # matrix[l,k,:] = (l_count, k_count, s_count)
+
+        pool.close()
+
+        while len(tasks) > 0:
+            print(f"waiting for {len(tasks):7,d} tasks")
             sys.stdout.flush()
-            
-            # l_header:Header = l_data["header"]
-
-            task = pool.apply_async(calculate_distance, (k_data["index_file"], l_data["index_file"]), {"buffer_size": buffer_size, "min_count": min_count, "max_count": max_count, "block_size": block_size})
-            tasks[(k,l)] = [True, task]
-
-            # k_count, l_count, s_count = k_header.calculate_distance(l_header, min_count=min_count, max_count=max_count, block_size=block_size)
-            
-            # print(f"   matrix Total #1 {k_count:15,d} Total #2 {l_count:15,d} Shared {s_count:15,d}")
-            # matrix[k,l,:] = (k_count, l_count, s_count)
-            # matrix[l,k,:] = (l_count, k_count, s_count)
-
-    while len(tasks) > 0:
-        print(f"waiting for {len(tasks)} tasks")
-        for key, (running, task) in tasks.items():
-            (k,l) = key
-            if running:
+            for key, (running, task) in tasks.items():
+                # print("  checking", key)
                 try:
-                    k_count, l_count, s_count = task.get(timeout=1)
+                    k_count, l_count, s_count = task.get(timeout=0)
                 except TimeoutError:
                     continue
+                (k,l) = key
                 print(f"   matrix Total #{k:3d} {k_count:15,d} Total #{l:3d} {l_count:15,d} Shared {s_count:15,d}")
+                sys.stdout.flush()
                 matrix[k,l,:] = (k_count, l_count, s_count)
                 matrix[l,k,:] = (l_count, k_count, s_count)
                 tasks[key][0] = False
-        tasks = {k:v for k,v in tasks.items() if v[0]}
-        time.sleep(10)
+            tasks = {k:v for k,v in tasks.items() if v[0]}
+            # print("  sleeping", key)
+            # sys.stdout.flush()
+            time.sleep(10)
 
+        print(f"\nfinished waiting. joining\n")
+        pool.join()
+        print(f"\nfinished waiting. joined\n")
 
-    for k,v in data.items():
+    for v in data:
         v["header"] = v["header"].to_dict(lean=True)
 
     output = {
@@ -184,7 +199,7 @@ def merge(
     print(f"saving {outfile_json}")
     with outfile_json_tmp.open(mode="wt") as fhd:
         json.dump(output, fhd, sort_keys=True, indent=1)
-    outfile_json_tmp.rename(outfile)
+    outfile_json_tmp.rename(outfile_json)
 
     print(f"saving {outfile}")
     outfile_tmp = Path(f"{outfile}.tmp")
@@ -204,6 +219,7 @@ def main() -> None:
     max_count    :int        = args.max_count
     buffer_size  :int        = args.buffer_size
     block_size   :int        = args.block_size
+    threads      :int        = args.threads
 
     if len(indexes) <= 1:
         print("needs at least 2 files")
@@ -218,7 +234,8 @@ def main() -> None:
         min_count   = min_count,
         max_count   = max_count,
         buffer_size = buffer_size,
-        block_size    = block_size
+        block_size  = block_size,
+        threads     = threads
     )
 
 if __name__ == "__main__":

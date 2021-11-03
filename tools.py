@@ -190,6 +190,9 @@ class Header(HeaderVars):
             return self.index_file_root
 
     @property
+    def index_file_basename(self) -> str: return os.path.basename(self.index_file)
+
+    @property
     def index_file_root(self) -> str: return f"{self.input_file_path}.{self.kmer_len:02d}.{self.IND_EXT}"
 
     @property
@@ -433,13 +436,14 @@ class Header(HeaderVars):
         self.check_data_file(self.index_tmp_file)
 
 
-    def calculate_distance(self, other: "Header", min_count: int=HeaderVars.DEFAULT_MIN_COUNT, max_count: int=HeaderVars.DEFAULT_MAX_COUNT, block_size: int=HeaderVars.DEFAULT_BLOCK_SIZE):
+    def calculate_distance(self, other: "Header", min_count: int=HeaderVars.DEFAULT_MIN_COUNT, max_count: int=HeaderVars.DEFAULT_MAX_COUNT, block_size: int=HeaderVars.DEFAULT_BLOCK_SIZE, threading=False):
         s_count = 0
         o_count = 0
         c_count = 0
         blk_sum = 0
         assert self.data_size == other.data_size
 
+        num_blocks = self.data_size // block_size +1
         for s_fhd in self.open_index_file():
             for o_fhd in other.open_index_file():
                 for blk_num, blk_start in enumerate(range(0,self.data_size,block_size)):                    
@@ -451,11 +455,14 @@ class Header(HeaderVars):
                     blk_sum += block_size_eff
                     # print(blk_start, blk_end)
 
-                    sys.stdout.write(f" {blk_num+1:15,d} {blk_start+1:15,d}/{self.data_size:15,d} ({(blk_start+1)/self.data_size*100.0:6.2f}%)")
+                    if threading:
+                        sys.stdout.write(f" {self.index_file_basename[:50]:50s} x {other.index_file_basename[:50]:50s} :: {blk_num+1:15,d}/{num_blocks:15,d} {blk_start+1:15,d}/{self.data_size:15,d} ({(blk_start+1)/self.data_size*100.0:6.2f}%)\n")
+
+                    else:
+                        sys.stdout.write(f" {blk_num+1:15,d} {blk_start+1:15,d}/{self.data_size:15,d} ({(blk_start+1)/self.data_size*100.0:6.2f}%)")
+                        if ((blk_num + 1) % 3) == 0:
+                            print()
                     sys.stdout.flush()
-                    
-                    if ((blk_num + 1) % 3) == 0:
-                        print()
 
                     s_blk = np.frombuffer(s_fhd.read(block_size_eff), dtype=np.uint8, count=block_size_eff)
                     o_blk = np.frombuffer(o_fhd.read(block_size_eff), dtype=np.uint8, count=block_size_eff)
