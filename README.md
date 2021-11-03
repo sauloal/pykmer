@@ -24,6 +24,10 @@ bgzip -i -I $F.bgz.gzi -l 9 -c $F > $F.bgz
 ./merger.py $F.bgz $F.bgz
 
 pypy ./merger.py data/*.15.kin.bgz
+
+./calculate_distance.sh merged.001-255.kma
+
+./calculate_distance.sh merged.001-050.kma
 ```
 
 ## Benchmark
@@ -65,6 +69,10 @@ saving merged.kma
 real    333m56.907s 6h
 user    303m45.443s
 sys      29m45.602s
+
+real    351m20.043s
+user    1256m13.652s
+sys     113m55.620s
 ```
 
 ## Output
@@ -212,7 +220,9 @@ with matrix as `matrix` key.
 
 ### Convert
 
-`./calculate_distance.sh merged.kma`
+`./calculate_distance.sh merged.001-255.kma`
+
+`./calculate_distance.sh merged.001-050.kma`
 
 or
 
