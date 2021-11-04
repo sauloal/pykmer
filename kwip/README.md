@@ -232,4 +232,8 @@ done
     --distance test.dist \
     --verbose \
     ../data/*.khmer
+
+# real     7m 5.453s
+# user    18m48.806s
+# sys      0m55.190s
 ```
